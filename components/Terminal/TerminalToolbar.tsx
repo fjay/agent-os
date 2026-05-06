@@ -13,6 +13,7 @@ import {
   Trash2,
   MousePointer2,
   Copy,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -44,6 +45,37 @@ interface Snippet {
   id: string;
   name: string;
   content: string;
+}
+
+interface ComboKey {
+  id: string;
+  name: string;
+  sequence: string;
+}
+
+const COMBO_STORAGE_KEY = "terminal-combo-keys";
+
+const DEFAULT_COMBOS: ComboKey[] = [
+  { id: "combo-1", name: "Alt+P", sequence: "\x1bp" },
+  { id: "combo-2", name: "Shift+Tab", sequence: "\x1b[Z" },
+];
+
+function getStoredCombos(): ComboKey[] {
+  if (typeof window === "undefined") return DEFAULT_COMBOS;
+  try {
+    const stored = localStorage.getItem(COMBO_STORAGE_KEY);
+    if (!stored) {
+      saveCombos(DEFAULT_COMBOS);
+      return DEFAULT_COMBOS;
+    }
+    return JSON.parse(stored);
+  } catch {
+    return DEFAULT_COMBOS;
+  }
+}
+
+function saveCombos(combos: ComboKey[]) {
+  localStorage.setItem(COMBO_STORAGE_KEY, JSON.stringify(combos));
 }
 
 const SNIPPETS_STORAGE_KEY = "terminal-snippets";
@@ -99,6 +131,177 @@ function getStoredSnippets(): Snippet[] {
 
 function saveSnippets(snippets: Snippet[]) {
   localStorage.setItem(SNIPPETS_STORAGE_KEY, JSON.stringify(snippets));
+}
+
+// Combo keys modal for sending modifier key combinations
+function ComboKeysModal({
+  open,
+  onClose,
+  onSend,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSend: (sequence: string) => void;
+}) {
+  const [combos, setCombos] = useState<ComboKey[]>(() => getStoredCombos());
+  const [isAdding, setIsAdding] = useState(false);
+  const [modifiers, setModifiers] = useState<Set<string>>(new Set(["alt"]));
+  const [newKey, setNewKey] = useState("");
+
+  const toggleModifier = (m: string) => {
+    setModifiers((prev) => {
+      const next = new Set(prev);
+      next.has(m) ? next.delete(m) : next.add(m);
+      return next;
+    });
+  };
+
+  const handleAdd = () => {
+    if (!newKey.trim()) return;
+    const key = newKey.trim().toLowerCase();
+    let sequence = key;
+    const parts: string[] = [];
+
+    if (modifiers.has("ctrl")) {
+      parts.push("Ctrl");
+      sequence = String.fromCharCode(key.charCodeAt(0) - 96);
+    }
+    if (modifiers.has("alt")) {
+      parts.push("Alt");
+      sequence = "\x1b" + sequence;
+    }
+    if (modifiers.has("shift")) {
+      parts.push("Shift");
+    }
+
+    const name = parts.length
+      ? parts.join("+") + "+" + newKey.trim().toUpperCase()
+      : newKey.trim();
+    const newCombo: ComboKey = {
+      id: Date.now().toString(),
+      name,
+      sequence,
+    };
+    const updated = [...combos, newCombo];
+    setCombos(updated);
+    saveCombos(updated);
+    setNewKey("");
+    setModifiers(new Set(["alt"]));
+    setIsAdding(false);
+  };
+
+  const handleDelete = (id: string) => {
+    const updated = combos.filter((c) => c.id !== id);
+    setCombos(updated);
+    saveCombos(updated);
+  };
+
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-background flex max-h-[70vh] w-full flex-col rounded-t-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-border flex items-center justify-between border-b px-4 py-3">
+          <span className="text-sm font-medium">Combo Keys</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsAdding(!isAdding)}
+              className="hover:bg-muted rounded-md p-1.5"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+            <button
+              onClick={onClose}
+              className="hover:bg-muted rounded-md p-1.5"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {isAdding && (
+          <div className="border-border bg-muted/50 border-b px-4 py-3">
+            <div className="mb-2 flex gap-2">
+              {["shift", "alt", "ctrl"].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => toggleModifier(m)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-xs font-medium",
+                    modifiers.has(m)
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-secondary text-secondary-foreground"
+                  )}
+                >
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              value={newKey}
+              onChange={(e) =>
+                setNewKey(
+                  e.target.value
+                    .replace(/[^a-zA-Z0-9.@/\\\-_]/g, "")
+                    .slice(0, 3)
+                )
+              }
+              placeholder="Key (e.g. P, ., /)..."
+              className="bg-background focus:ring-primary mb-2 w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleAdd();
+              }}
+            />
+            <button
+              onClick={handleAdd}
+              disabled={!newKey.trim()}
+              className="bg-primary text-primary-foreground w-full rounded-lg py-2 font-medium disabled:opacity-50"
+            >
+              Add Combo
+            </button>
+          </div>
+        )}
+
+        <div className="flex-1 overflow-y-auto">
+          {combos.length === 0 ? (
+            <div className="text-muted-foreground px-4 py-8 text-center text-sm">
+              No combos yet. Tap + to add one.
+            </div>
+          ) : (
+            combos.map((combo) => (
+              <div
+                key={combo.id}
+                className="border-border active:bg-muted flex items-center gap-2 border-b px-4 py-3"
+              >
+                <button
+                  onClick={() => {
+                    onSend(combo.sequence);
+                    onClose();
+                  }}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <div className="text-sm font-medium">{combo.name}</div>
+                </button>
+                <button
+                  onClick={() => handleDelete(combo.id)}
+                  className="hover:bg-destructive/20 text-muted-foreground hover:text-destructive rounded-md p-2"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // Snippets modal for saving/inserting common commands
@@ -313,6 +516,7 @@ export function TerminalToolbar({
 }: TerminalToolbarProps) {
   const [showPasteModal, setShowPasteModal] = useState(false);
   const [showSnippetsModal, setShowSnippetsModal] = useState(false);
+  const [showComboModal, setShowComboModal] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
@@ -379,10 +583,90 @@ export function TerminalToolbar({
         onClose={() => setShowSnippetsModal(false)}
         onInsert={sendText}
       />
+      <ComboKeysModal
+        open={showComboModal}
+        onClose={() => setShowComboModal(false)}
+        onSend={onKeyPress}
+      />
       <div
         className="bg-background/95 border-border scrollbar-none flex items-center gap-1 overflow-x-auto border-t px-2 py-1.5 backdrop-blur"
         onTouchEnd={(e) => e.stopPropagation()}
       >
+        {/* Combo keys button */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowComboModal(true);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+        >
+          <Zap className="h-4 w-4" />
+        </button>
+
+        {/* Shift toggle */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShiftActive(!shiftActive);
+          }}
+          className={cn(
+            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+            shiftActive
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
+          )}
+        >
+          ⇧
+        </button>
+
+        {/* Enter key */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onKeyPress(shiftActive ? "\n" : "\r");
+            setShiftActive(false);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+        >
+          ↵
+        </button>
+
+        {/* Special keys */}
+        {buttons.map((btn) => (
+          <button
+            type="button"
+            key={btn.label}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={(e) => {
+              e.stopPropagation();
+              let key: string = btn.key;
+              if (btn.label === "Tab" && shiftActive) {
+                key = "\x1b[Z";
+              }
+              onKeyPress(key);
+              if (shiftActive) setShiftActive(false);
+            }}
+            className={cn(
+              "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+              "active:bg-primary active:text-primary-foreground",
+              btn.highlight
+                ? "bg-red-500/20 text-red-500"
+                : "bg-secondary text-secondary-foreground"
+            )}
+          >
+            {btn.label}
+          </button>
+        ))}
+
+        {/* Divider */}
+        <div className="bg-border mx-1 h-6 w-px" />
+
         {/* Mic button */}
         {isMicSupported && (
           <button
@@ -488,63 +772,6 @@ export function TerminalToolbar({
         >
           <FileText className="h-4 w-4" />
         </button>
-
-        {/* Divider */}
-        <div className="bg-border mx-1 h-6 w-px" />
-
-        {/* Shift toggle */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShiftActive(!shiftActive);
-          }}
-          className={cn(
-            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
-            shiftActive
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
-          )}
-        >
-          ⇧
-        </button>
-
-        {/* Enter key - sends \n if shift active, \r otherwise */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onKeyPress(shiftActive ? "\n" : "\r");
-            setShiftActive(false);
-          }}
-          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
-        >
-          ↵
-        </button>
-
-        {/* Special keys */}
-        {buttons.map((btn) => (
-          <button
-            type="button"
-            key={btn.label}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={(e) => {
-              e.stopPropagation();
-              onKeyPress(btn.key);
-            }}
-            className={cn(
-              "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
-              "active:bg-primary active:text-primary-foreground",
-              btn.highlight
-                ? "bg-red-500/20 text-red-500"
-                : "bg-secondary text-secondary-foreground"
-            )}
-          >
-            {btn.label}
-          </button>
-        ))}
       </div>
     </>
   );
