@@ -31,6 +31,11 @@ export interface PaneState {
   panes: Record<string, PaneData>;
 }
 
+export interface OpenTabMatch {
+  paneId: string;
+  tabId: string;
+}
+
 // Generate unique tab ID
 export function generateTabId(): string {
   return `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -196,6 +201,30 @@ export function getAllPaneIds(layout: PaneLayout): string[] {
     return [layout.paneId];
   }
   return layout.children.flatMap(getAllPaneIds);
+}
+
+// Find an open tab for a given session, preferring the focused pane.
+export function findOpenTabBySessionId(
+  state: PaneState,
+  sessionId: string
+): OpenTabMatch | null {
+  const focusedPane = state.panes[state.focusedPaneId];
+  const focusedMatch = focusedPane?.tabs.find(
+    (tab) => tab.sessionId === sessionId
+  );
+  if (focusedMatch) {
+    return { paneId: state.focusedPaneId, tabId: focusedMatch.id };
+  }
+
+  for (const [paneId, pane] of Object.entries(state.panes)) {
+    if (paneId === state.focusedPaneId) continue;
+    const match = pane.tabs.find((tab) => tab.sessionId === sessionId);
+    if (match) {
+      return { paneId, tabId: match.id };
+    }
+  }
+
+  return null;
 }
 
 // localStorage key for persisting pane state

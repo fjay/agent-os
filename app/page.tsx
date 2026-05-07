@@ -52,7 +52,15 @@ function HomeContent() {
   const terminalRefs = useRef<Map<string, TerminalHandle>>(new Map());
 
   // Pane context
-  const { focusedPaneId, attachSession, getActiveTab, addTab } = usePanes();
+  const {
+    focusedPaneId,
+    focusPane,
+    switchTab,
+    attachSession,
+    getActiveTab,
+    addTab,
+    findOpenTabBySessionId,
+  } = usePanes();
   const focusedActiveTab = getActiveTab(focusedPaneId);
   const { isMobile, isHydrated } = useViewport();
 
@@ -105,44 +113,6 @@ function HomeContent() {
     },
     []
   );
-
-  // Get terminal for a pane, with fallback to first available
-  const getTerminalWithFallback = useCallback(():
-    | { terminal: TerminalHandle; paneId: string; tabId: string }
-    | undefined => {
-    debugLog(
-      `getTerminalWithFallback called, total refs: ${terminalRefs.current.size}, focusedPaneId: ${focusedPaneId}`
-    );
-
-    // Try focused pane first
-    const activeTab = getActiveTab(focusedPaneId);
-    debugLog(`activeTab for focused pane: ${activeTab?.id || "null"}`);
-
-    if (activeTab) {
-      const key = `${focusedPaneId}:${activeTab.id}`;
-      const terminal = terminalRefs.current.get(key);
-      debugLog(
-        `Looking for terminal at key "${key}": ${terminal ? "found" : "not found"}`
-      );
-      if (terminal) {
-        return { terminal, paneId: focusedPaneId, tabId: activeTab.id };
-      }
-    }
-
-    // Fallback to first available terminal
-    const firstEntry = terminalRefs.current.entries().next().value;
-    if (firstEntry) {
-      const [key, terminal] = firstEntry as [string, TerminalHandle];
-      const [paneId, tabId] = key.split(":");
-      debugLog(`Using fallback terminal: ${key}`);
-      return { terminal, paneId, tabId };
-    }
-
-    debugLog(
-      `NO TERMINAL FOUND. Available keys: ${Array.from(terminalRefs.current.keys()).join(", ") || "none"}`
-    );
-    return undefined;
-  }, [focusedPaneId, getActiveTab]);
 
   // Build tmux command for a session
   const buildSessionCommand = useCallback(
@@ -216,74 +186,31 @@ function HomeContent() {
     [attachSession]
   );
 
-  // Attach session to terminal
-  const attachToSession = useCallback(
+  const ensureSessionOpen = useCallback(
     async (session: Session) => {
-      const terminalInfo = getTerminalWithFallback();
-      if (!terminalInfo) {
-        debugLog(
-          `ERROR: No terminal available to attach session: ${session.name}`
-        );
-        alert(
-          `[AgentOS Debug] No terminal available!\n\nRun agentOSLogs() in console to see debug logs.`
-        );
+      const openTab = findOpenTabBySessionId(session.id);
+      if (openTab) {
+        focusPane(openTab.paneId);
+        switchTab(openTab.paneId, openTab.tabId);
         return;
       }
 
-      const { terminal, paneId } = terminalInfo;
-      const activeTab = getActiveTab(paneId);
-      const isInTmux = !!activeTab?.attachedTmux;
-
-      if (isInTmux) {
-        terminal.sendInput("\x02d");
-      }
-
-      setTimeout(
-        () => {
-          terminal.sendInput("\x03");
-          setTimeout(async () => {
-            const sessionInfo = await buildSessionCommand(session);
-            runSessionInTerminal(terminal, paneId, session, sessionInfo);
-          }, 50);
-        },
-        isInTmux ? 100 : 0
-      );
-    },
-    [
-      getTerminalWithFallback,
-      getActiveTab,
-      buildSessionCommand,
-      runSessionInTerminal,
-    ]
-  );
-
-  // Open session in new tab
-  const openSessionInNewTab = useCallback(
-    (session: Session) => {
-      const existingKeys = new Set(terminalRefs.current.keys());
-      addTab(focusedPaneId);
+      const paneId = focusedPaneId;
+      const newTabId = addTab(paneId);
+      focusPane(paneId);
+      switchTab(paneId, newTabId);
 
       let attempts = 0;
       const maxAttempts = 20;
 
       const waitForNewTerminal = () => {
         attempts++;
-
-        for (const key of terminalRefs.current.keys()) {
-          if (!existingKeys.has(key) && key.startsWith(`${focusedPaneId}:`)) {
-            const terminal = terminalRefs.current.get(key);
-            if (terminal) {
-              buildSessionCommand(session).then((sessionInfo) => {
-                runSessionInTerminal(
-                  terminal,
-                  focusedPaneId,
-                  session,
-                  sessionInfo
-                );
-              });
-              return;
-            }
-          }
+        const terminal = terminalRefs.current.get(`${paneId}:${newTabId}`);
+        if (terminal) {
+          buildSessionCommand(session).then((sessionInfo) => {
+            runSessionInTerminal(terminal, paneId, session, sessionInfo);
+          });
+          return;
         }
 
         if (attempts < maxAttempts) {
@@ -295,7 +222,65 @@ function HomeContent() {
 
       setTimeout(waitForNewTerminal, 50);
     },
-    [addTab, focusedPaneId, buildSessionCommand, runSessionInTerminal]
+    [
+      addTab,
+      buildSessionCommand,
+      focusPane,
+      focusedPaneId,
+      findOpenTabBySessionId,
+      runSessionInTerminal,
+      switchTab,
+    ]
+  );
+
+  // Attach session to terminal, reusing an existing tab when available.
+  const attachToSession = useCallback(
+    async (session: Session) => {
+      await ensureSessionOpen(session);
+    },
+    [ensureSessionOpen]
+  );
+
+  // Open session in new tab
+  const openSessionInNewTab = useCallback(
+    (session: Session) => {
+      const paneId = focusedPaneId;
+      const newTabId = addTab(paneId);
+      focusPane(paneId);
+      switchTab(paneId, newTabId);
+
+      let attempts = 0;
+      const maxAttempts = 20;
+
+      const waitForNewTerminal = () => {
+        attempts++;
+
+        const key = `${paneId}:${newTabId}`;
+        const terminal = terminalRefs.current.get(key);
+        if (terminal) {
+          buildSessionCommand(session).then((sessionInfo) => {
+            runSessionInTerminal(terminal, paneId, session, sessionInfo);
+          });
+          return;
+        }
+
+        if (attempts < maxAttempts) {
+          setTimeout(waitForNewTerminal, 50);
+        } else {
+          debugLog(`Failed to find new terminal after ${maxAttempts} attempts`);
+        }
+      };
+
+      setTimeout(waitForNewTerminal, 50);
+    },
+    [
+      addTab,
+      buildSessionCommand,
+      focusPane,
+      focusedPaneId,
+      runSessionInTerminal,
+      switchTab,
+    ]
   );
 
   // Notification click handler

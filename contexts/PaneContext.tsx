@@ -12,12 +12,14 @@ import {
   type PaneState,
   type PaneData,
   type TabData,
+  type OpenTabMatch,
   createInitialPaneState,
   createPaneData,
   createTab,
   splitPane,
   closePane,
   countPanes,
+  findOpenTabBySessionId,
   savePaneState,
   loadPaneState,
   MAX_PANES,
@@ -35,7 +37,7 @@ interface PaneContextValue {
   splitVertical: (paneId: string) => void;
   close: (paneId: string) => void;
   // Tab management
-  addTab: (paneId: string) => void;
+  addTab: (paneId: string) => string;
   closeTab: (paneId: string, tabId: string) => void;
   switchTab: (paneId: string, tabId: string) => void;
   // Session management (operates on active tab)
@@ -43,6 +45,7 @@ interface PaneContextValue {
   detachSession: (paneId: string) => void;
   getPaneData: (paneId: string) => PaneData;
   getActiveTab: (paneId: string) => TabData | null;
+  findOpenTabBySessionId: (sessionId: string) => OpenTabMatch | null;
 }
 
 const PaneContext = createContext<PaneContextValue | null>(null);
@@ -119,10 +122,10 @@ export function PaneProvider({ children }: { children: ReactNode }) {
 
   // Tab management
   const addTab = useCallback((paneId: string) => {
+    const newTab = createTab();
     setState((prev) => {
       const pane = prev.panes[paneId];
       if (!pane) return prev;
-      const newTab = createTab();
       return {
         ...prev,
         panes: {
@@ -135,6 +138,7 @@ export function PaneProvider({ children }: { children: ReactNode }) {
         },
       };
     });
+    return newTab.id;
   }, []);
 
   const closeTab = useCallback((paneId: string, tabId: string) => {
@@ -240,6 +244,13 @@ export function PaneProvider({ children }: { children: ReactNode }) {
     [state.panes]
   );
 
+  const findTabBySessionId = useCallback(
+    (sessionId: string): OpenTabMatch | null => {
+      return findOpenTabBySessionId(state, sessionId);
+    },
+    [state]
+  );
+
   // On mobile: disable splits (single pane only)
   const canSplit = !isMobile && countPanes(state.layout) < MAX_PANES;
   const canClose = !isMobile && countPanes(state.layout) > 1;
@@ -263,6 +274,7 @@ export function PaneProvider({ children }: { children: ReactNode }) {
         detachSession,
         getPaneData,
         getActiveTab,
+        findOpenTabBySessionId: findTabBySessionId,
       }}
     >
       {children}
