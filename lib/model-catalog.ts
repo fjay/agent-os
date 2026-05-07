@@ -12,6 +12,9 @@ const CLAUDE_MODEL_OPTIONS: ModelOption[] = [
 ];
 
 const CODEX_MODEL_OPTIONS: ModelOption[] = [
+  { value: "gpt-5.5", label: "GPT-5.5" },
+  { value: "gpt-5.5-mini", label: "GPT-5.5 mini" },
+  { value: "gpt-5.5-nano", label: "GPT-5.5 nano" },
   { value: "gpt-5.4", label: "GPT-5.4" },
   { value: "gpt-5.4-mini", label: "GPT-5.4 mini" },
   { value: "gpt-5.4-nano", label: "GPT-5.4 nano" },

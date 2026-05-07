@@ -27,6 +27,7 @@ import {
 import { useViewport } from "@/hooks/useViewport";
 
 interface PaneContextValue {
+  hydrated: boolean;
   state: PaneState;
   focusedPaneId: string;
   canSplit: boolean;
@@ -258,6 +259,7 @@ export function PaneProvider({ children }: { children: ReactNode }) {
   return (
     <PaneContext.Provider
       value={{
+        hydrated,
         state,
         focusedPaneId: state.focusedPaneId,
         canSplit,

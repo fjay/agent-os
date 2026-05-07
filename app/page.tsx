@@ -32,6 +32,7 @@ import { useProjects } from "@/hooks/useProjects";
 import { useDevServersManager } from "@/hooks/useDevServersManager";
 import { useSessionStatuses } from "@/hooks/useSessionStatuses";
 import type { Session } from "@/lib/db";
+import type { TabData } from "@/lib/panes";
 import type { TerminalHandle } from "@/components/Terminal";
 import { getProvider } from "@/lib/providers";
 import { DesktopView } from "@/components/views/DesktopView";
@@ -241,6 +242,41 @@ function HomeContent() {
     [ensureSessionOpen]
   );
 
+  // Restore a tab's tmux session after restart (same logic as sidebar click)
+  const handleTabRestore = useCallback(
+    async (paneId: string, tab: TabData) => {
+      if (!tab.sessionId) return;
+
+      let session = sessions.find((s) => s.id === tab.sessionId);
+      if (!session) {
+        try {
+          const res = await fetch(`/api/sessions/${tab.sessionId}`);
+          const data = await res.json();
+          session = data.session;
+        } catch {
+          return;
+        }
+      }
+      if (!session) return;
+
+      const key = `${paneId}:${tab.id}`;
+      const terminal = terminalRefs.current.get(key);
+      if (!terminal) return;
+
+      buildSessionCommand(session).then((sessionInfo) => {
+        const { sessionName, cwd, command } = sessionInfo;
+        const tmuxNew = command
+          ? `tmux new -s ${sessionName} -c "${cwd}" "${command}"`
+          : `tmux new -s ${sessionName} -c "${cwd}"`;
+        terminal.sendCommand(
+          `tmux set -g mouse on 2>/dev/null; tmux attach -t ${sessionName} 2>/dev/null || ${tmuxNew}`
+        );
+        attachSession(paneId, session.id, sessionName);
+      });
+    },
+    [sessions, buildSessionCommand, attachSession]
+  );
+
   // Open session in new tab
   const openSessionInNewTab = useCallback(
     (session: Session) => {
@@ -355,9 +391,17 @@ function HomeContent() {
         onRegisterTerminal={registerTerminalRef}
         onMenuClick={isMobile ? () => setSidebarOpen(true) : undefined}
         onSelectSession={handleSelectSession}
+        onRestoreTab={handleTabRestore}
       />
     ),
-    [sessions, projects, registerTerminalRef, isMobile, handleSelectSession]
+    [
+      sessions,
+      projects,
+      registerTerminalRef,
+      isMobile,
+      handleSelectSession,
+      handleTabRestore,
+    ]
   );
 
   // New session in project handler

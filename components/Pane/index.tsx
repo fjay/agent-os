@@ -9,6 +9,7 @@ import type {
   TerminalScrollState,
 } from "@/components/Terminal";
 import type { Session, Project } from "@/lib/db";
+import type { TabData } from "@/lib/panes";
 import { sessionRegistry } from "@/lib/client/session-registry";
 import { cn } from "@/lib/utils";
 import { ConductorPanel } from "@/components/ConductorPanel";
@@ -57,6 +58,7 @@ interface PaneProps {
   ) => void;
   onMenuClick?: () => void;
   onSelectSession?: (sessionId: string) => void;
+  onRestoreTab?: (paneId: string, tab: TabData) => void;
 }
 
 type ViewMode = "terminal" | "files" | "git" | "workers";
@@ -68,9 +70,11 @@ export const Pane = memo(function Pane({
   onRegisterTerminal,
   onMenuClick,
   onSelectSession,
+  onRestoreTab,
 }: PaneProps) {
   const { isMobile } = useViewport();
   const {
+    hydrated,
     focusedPaneId,
     canSplit,
     canClose,
@@ -98,6 +102,9 @@ export const Pane = memo(function Pane({
     return stored === "true";
   });
   const terminalRefs = useRef<Map<string, TerminalHandle | null>>(new Map());
+  const onRestoreTabRef = useRef(onRestoreTab);
+  onRestoreTabRef.current = onRestoreTab;
+  const restoredTabsRef = useRef<Set<string>>(new Set());
   const paneData = getPaneData(paneId);
   const activeTab = getActiveTab(paneId);
 
@@ -211,6 +218,26 @@ export const Pane = memo(function Pane({
     },
     [paneId, sessions, onRegisterTerminal]
   );
+
+  // After hydration, restore tmux sessions for tabs that connected before tab data was available
+  useEffect(() => {
+    if (!hydrated) return;
+
+    const timer = setTimeout(() => {
+      for (const tab of paneData.tabs) {
+        if (!tab.attachedTmux || !tab.sessionId) continue;
+        if (restoredTabsRef.current.has(tab.id)) continue;
+        const handle = terminalRefs.current.get(tab.id);
+        if (handle) {
+          restoredTabsRef.current.add(tab.id);
+          onRestoreTabRef.current?.(paneId, tab);
+        }
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
 
   // Track current tab ID for cleanup
   const activeTabIdRef = useRef<string | null>(null);

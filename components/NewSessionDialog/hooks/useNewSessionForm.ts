@@ -44,7 +44,7 @@ export function useNewSessionForm({
   const [workingDirectory, setWorkingDirectory] = useState("~");
   const [projectId, setProjectId] = useState<string | null>(null);
   const [agentType, setAgentType] = useState<AgentType>("claude");
-  const [skipPermissions, setSkipPermissions] = useState(false);
+  const [skipPermissions, setSkipPermissions] = useState(true);
   const [useTmux, setUseTmux] = useState(true);
   const [initialPrompt, setInitialPrompt] = useState("");
 

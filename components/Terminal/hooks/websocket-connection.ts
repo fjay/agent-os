@@ -21,6 +21,8 @@ export interface WebSocketManager {
   cleanup: () => void;
 }
 
+const HEARTBEAT_INTERVAL = 10000;
+
 export function createWebSocketConnection(
   term: XTerm,
   callbacks: WebSocketCallbacks,
@@ -32,6 +34,28 @@ export function createWebSocketConnection(
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal`);
   wsRef.current = ws;
+
+  let heartbeatTimer: NodeJS.Timeout | null = null;
+
+  const startHeartbeat = () => {
+    stopHeartbeat();
+    heartbeatTimer = setInterval(() => {
+      const currentWs = wsRef.current;
+      if (!currentWs || currentWs.readyState !== WebSocket.OPEN) {
+        stopHeartbeat();
+        forceReconnect();
+        return;
+      }
+      currentWs.send(JSON.stringify({ type: "ping" }));
+    }, HEARTBEAT_INTERVAL);
+  };
+
+  const stopHeartbeat = () => {
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+  };
 
   const sendResize = (cols: number, rows: number) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -62,6 +86,8 @@ export function createWebSocketConnection(
 
   const forceReconnect = () => {
     if (intentionalCloseRef.current) return;
+
+    stopHeartbeat();
 
     // Clear any pending reconnect
     if (reconnectTimeoutRef.current) {
@@ -113,6 +139,7 @@ export function createWebSocketConnection(
     callbacks.onConnected?.();
     sendResize(term.cols, term.rows);
     term.focus();
+    startHeartbeat();
   };
 
   // Fight against Claude Code's forced top-scrolling bug
@@ -149,6 +176,7 @@ export function createWebSocketConnection(
   };
 
   ws.onclose = () => {
+    stopHeartbeat();
     callbacks.onSetConnected(false);
     callbacks.onDisconnected?.();
 
@@ -233,6 +261,7 @@ export function createWebSocketConnection(
   document.addEventListener("visibilitychange", handleVisibilityChange);
 
   const cleanup = () => {
+    stopHeartbeat();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
