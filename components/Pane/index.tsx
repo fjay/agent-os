@@ -58,6 +58,7 @@ interface PaneProps {
   ) => void;
   onMenuClick?: () => void;
   onSelectSession?: (sessionId: string) => void;
+  onActivateSessionTab?: (paneId: string, tabId: string) => void;
   onRestoreTab?: (paneId: string, tab: TabData) => void;
 }
 
@@ -70,6 +71,7 @@ export const Pane = memo(function Pane({
   onRegisterTerminal,
   onMenuClick,
   onSelectSession,
+  onActivateSessionTab,
   onRestoreTab,
 }: PaneProps) {
   const { isMobile } = useViewport();
@@ -198,10 +200,10 @@ export const Pane = memo(function Pane({
 
       const tab = paneData.tabs.find((t) => t.id === tabId);
       if (tab?.sessionId) {
-        onRestoreTabRef.current?.(paneId, tab);
+        onActivateSessionTab?.(paneId, tabId);
       }
     },
-    [paneData.tabs, paneId, switchTab]
+    [onActivateSessionTab, paneData.tabs, paneId, switchTab]
   );
 
   // Create ref callback for a specific tab

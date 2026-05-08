@@ -193,21 +193,28 @@ function HomeContent() {
     [attachSession, buildTmuxAttachOrCreateCommand]
   );
 
+  const activateOpenSessionTab = useCallback(
+    (paneId: string, tabId: string) => {
+      focusPane(paneId);
+      switchTab(paneId, tabId);
+
+      const terminal = terminalRefs.current.get(`${paneId}:${tabId}`);
+      if (!terminal) return;
+
+      const connectionState = terminal.getConnectionState();
+      if (connectionState === "disconnected") {
+        terminal.reconnect();
+      }
+      terminal.focus();
+    },
+    [focusPane, switchTab]
+  );
+
   const ensureSessionOpen = useCallback(
     async (session: Session) => {
       const openTab = findOpenTabBySessionId(session.id);
       if (openTab) {
-        focusPane(openTab.paneId);
-        switchTab(openTab.paneId, openTab.tabId);
-        const terminal = terminalRefs.current.get(
-          `${openTab.paneId}:${openTab.tabId}`
-        );
-        if (terminal) {
-          buildSessionCommand(session).then((sessionInfo) => {
-            terminal.sendCommand(buildTmuxAttachOrCreateCommand(sessionInfo));
-            terminal.focus();
-          });
-        }
+        activateOpenSessionTab(openTab.paneId, openTab.tabId);
         return;
       }
 
@@ -239,12 +246,12 @@ function HomeContent() {
       setTimeout(waitForNewTerminal, 50);
     },
     [
+      activateOpenSessionTab,
       addTab,
       buildSessionCommand,
-      buildTmuxAttachOrCreateCommand,
-      focusPane,
       focusedPaneId,
       findOpenTabBySessionId,
+      focusPane,
       runSessionInTerminal,
       switchTab,
     ]
@@ -400,6 +407,7 @@ function HomeContent() {
         onRegisterTerminal={registerTerminalRef}
         onMenuClick={isMobile ? () => setSidebarOpen(true) : undefined}
         onSelectSession={handleSelectSession}
+        onActivateSessionTab={activateOpenSessionTab}
         onRestoreTab={handleTabRestore}
       />
     ),
@@ -409,6 +417,7 @@ function HomeContent() {
       registerTerminalRef,
       isMobile,
       handleSelectSession,
+      activateOpenSessionTab,
       handleTabRestore,
     ]
   );

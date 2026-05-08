@@ -29,6 +29,12 @@ export interface TerminalHandle {
   sendCommand: (command: string) => void;
   sendInput: (data: string) => void;
   focus: () => void;
+  getConnectionState: () =>
+    | "connecting"
+    | "connected"
+    | "disconnected"
+    | "reconnecting";
+  reconnect: () => void;
   getScrollState: () => TerminalScrollState | null;
   restoreScrollState: (state: TerminalScrollState) => void;
   toggleSelectMode: () => void;
@@ -173,6 +179,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       sendCommand,
       sendInput,
       focus,
+      getConnectionState: () => connectionState,
+      reconnect,
       getScrollState,
       restoreScrollState,
       toggleSelectMode: () => handleSelectModeChange(!selectModeActive),
