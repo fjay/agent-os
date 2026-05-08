@@ -167,6 +167,17 @@ function HomeContent() {
   );
 
   // Attach a session to a terminal
+  const buildTmuxAttachOrCreateCommand = useCallback(
+    (sessionInfo: { sessionName: string; cwd: string; command: string }) => {
+      const { sessionName, cwd, command } = sessionInfo;
+      const tmuxNew = command
+        ? `tmux new -s ${sessionName} -c "${cwd}" "${command}"`
+        : `tmux new -s ${sessionName} -c "${cwd}"`;
+      return `tmux set -g mouse on 2>/dev/null; tmux attach -t ${sessionName} 2>/dev/null || ${tmuxNew}`;
+    },
+    []
+  );
+
   const runSessionInTerminal = useCallback(
     (
       terminal: TerminalHandle,
@@ -174,17 +185,12 @@ function HomeContent() {
       session: Session,
       sessionInfo: { sessionName: string; cwd: string; command: string }
     ) => {
-      const { sessionName, cwd, command } = sessionInfo;
-      const tmuxNew = command
-        ? `tmux new -s ${sessionName} -c "${cwd}" "${command}"`
-        : `tmux new -s ${sessionName} -c "${cwd}"`;
-      terminal.sendCommand(
-        `tmux set -g mouse on 2>/dev/null; tmux attach -t ${sessionName} 2>/dev/null || ${tmuxNew}`
-      );
+      const { sessionName } = sessionInfo;
+      terminal.sendCommand(buildTmuxAttachOrCreateCommand(sessionInfo));
       attachSession(paneId, session.id, sessionName);
       terminal.focus();
     },
-    [attachSession]
+    [attachSession, buildTmuxAttachOrCreateCommand]
   );
 
   const ensureSessionOpen = useCallback(
@@ -193,6 +199,15 @@ function HomeContent() {
       if (openTab) {
         focusPane(openTab.paneId);
         switchTab(openTab.paneId, openTab.tabId);
+        const terminal = terminalRefs.current.get(
+          `${openTab.paneId}:${openTab.tabId}`
+        );
+        if (terminal) {
+          buildSessionCommand(session).then((sessionInfo) => {
+            terminal.sendCommand(buildTmuxAttachOrCreateCommand(sessionInfo));
+            terminal.focus();
+          });
+        }
         return;
       }
 
@@ -226,6 +241,7 @@ function HomeContent() {
     [
       addTab,
       buildSessionCommand,
+      buildTmuxAttachOrCreateCommand,
       focusPane,
       focusedPaneId,
       findOpenTabBySessionId,
@@ -264,17 +280,10 @@ function HomeContent() {
       if (!terminal) return;
 
       buildSessionCommand(session).then((sessionInfo) => {
-        const { sessionName, cwd, command } = sessionInfo;
-        const tmuxNew = command
-          ? `tmux new -s ${sessionName} -c "${cwd}" "${command}"`
-          : `tmux new -s ${sessionName} -c "${cwd}"`;
-        terminal.sendCommand(
-          `tmux set -g mouse on 2>/dev/null; tmux attach -t ${sessionName} 2>/dev/null || ${tmuxNew}`
-        );
-        attachSession(paneId, session.id, sessionName);
+        terminal.sendCommand(buildTmuxAttachOrCreateCommand(sessionInfo));
       });
     },
-    [sessions, buildSessionCommand, attachSession]
+    [sessions, buildSessionCommand, buildTmuxAttachOrCreateCommand]
   );
 
   // Open session in new tab

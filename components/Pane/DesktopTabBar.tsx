@@ -11,6 +11,7 @@ import {
   GitBranch,
   Users,
   Home,
+  MousePointer2,
 } from "lucide-react";
 import {
   Tooltip,
@@ -52,6 +53,8 @@ interface DesktopTabBarProps {
   onSplitVertical: () => void;
   onClose: () => void;
   onDetach: () => void;
+  selectMode?: boolean;
+  onSelectModeToggle?: () => void;
 }
 
 export function DesktopTabBar({
@@ -78,6 +81,8 @@ export function DesktopTabBar({
   onSplitVertical,
   onClose,
   onDetach,
+  selectMode,
+  onSelectModeToggle,
 }: DesktopTabBarProps) {
   const getTabName = (tab: Tab) => {
     if (tab.sessionId) {
@@ -221,6 +226,25 @@ export function DesktopTabBar({
               </button>
             </TooltipTrigger>
             <TooltipContent>Shell</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSelectModeToggle?.();
+                }}
+                className={cn(
+                  "rounded px-2 py-1 transition-colors",
+                  selectMode
+                    ? "bg-secondary text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <MousePointer2 className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Select mode (Ctrl+Shift+S)</TooltipContent>
           </Tooltip>
           {isConductor && (
             <Tooltip>

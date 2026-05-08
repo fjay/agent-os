@@ -14,6 +14,8 @@ const port = parseInt(portArg || process.env.PORT || "3011", 10);
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
+const activePtys = new Set<pty.IPty>();
+let shuttingDown = false;
 
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
@@ -66,6 +68,7 @@ app.prepare().then(() => {
         cwd: process.env.HOME || "/",
         env: minimalEnv,
       });
+      activePtys.add(ptyProcess);
     } catch (err) {
       console.error("Failed to spawn pty:", err);
       ws.send(
@@ -82,6 +85,7 @@ app.prepare().then(() => {
     });
 
     ptyProcess.onExit(({ exitCode }) => {
+      activePtys.delete(ptyProcess);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "exit", code: exitCode }));
         ws.close();
@@ -113,11 +117,13 @@ app.prepare().then(() => {
     });
 
     ws.on("close", () => {
+      activePtys.delete(ptyProcess);
       ptyProcess.kill();
     });
 
     ws.on("error", (err) => {
       console.error("WebSocket error:", err);
+      activePtys.delete(ptyProcess);
       ptyProcess.kill();
     });
   });
@@ -125,4 +131,36 @@ app.prepare().then(() => {
   server.listen(port, () => {
     console.log(`> Agent-OS ready on http://${hostname}:${port}`);
   });
+
+  const shutdown = (signal: NodeJS.Signals) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}, shutting down AgentOS server`);
+
+    terminalWss.clients.forEach((client) => {
+      try {
+        client.close(1001, "Server shutting down");
+      } catch {
+        /* ignore */
+      }
+    });
+
+    for (const ptyProcess of activePtys) {
+      try {
+        ptyProcess.kill();
+      } catch {
+        /* ignore */
+      }
+    }
+    activePtys.clear();
+
+    server.close(() => {
+      process.exit(0);
+    });
+
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 });

@@ -356,6 +356,7 @@ ExecStart=$script_path start-foreground
 Restart=on-failure
 RestartSec=10
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
+KillMode=process
 
 [Install]
 WantedBy=default.target
@@ -457,6 +458,13 @@ cmd_start_foreground() {
 
     # Create PID file before exec (PID stays the same after exec)
     echo "$$" > "$PID_FILE"
+
+    export NODE_ENV="${NODE_ENV:-production}"
+    export PORT="$PORT"
+
+    if [[ -x "$REPO_DIR/node_modules/.bin/tsx" ]]; then
+        exec "$REPO_DIR/node_modules/.bin/tsx" server.ts
+    fi
 
     exec npm start
 }

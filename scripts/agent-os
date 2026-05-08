@@ -12,7 +12,7 @@ PORT="${AGENT_OS_PORT:-3011}"
 REPO_URL="https://github.com/saadnvd1/agent-os.git"
 
 # Derived paths
-REPO_DIR="$AGENT_OS_HOME/repo"
+REPO_DIR="${AGENT_OS_REPO_DIR:-$AGENT_OS_HOME/repo}"
 PID_FILE="$AGENT_OS_HOME/agent-os.pid"
 LOG_FILE="$AGENT_OS_HOME/agent-os.log"
 

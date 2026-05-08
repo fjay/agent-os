@@ -101,6 +101,7 @@ export const Pane = memo(function Pane({
     const stored = localStorage.getItem("shellDrawerOpen");
     return stored === "true";
   });
+  const [selectMode, setSelectMode] = useState(false);
   const terminalRefs = useRef<Map<string, TerminalHandle | null>>(new Map());
   const onRestoreTabRef = useRef(onRestoreTab);
   onRestoreTabRef.current = onRestoreTab;
@@ -115,6 +116,14 @@ export const Pane = memo(function Pane({
   const isFocused = focusedPaneId === paneId;
   const session = activeTab
     ? sessions.find((s) => s.id === activeTab.sessionId)
+    : null;
+
+  // Resolve tmux session name for the active tab
+  const tmuxSessionName = activeTab
+    ? activeTab.sessionId
+      ? sessions.find((s) => s.id === activeTab.sessionId)?.tmux_name ||
+        activeTab.attachedTmux
+      : activeTab.attachedTmux
     : null;
 
   // File editor state - lifted here so it persists across view switches
@@ -183,6 +192,18 @@ export const Pane = memo(function Pane({
     detachSession(paneId);
   }, [detachSession, paneId, terminalRef]);
 
+  const handleTabSwitch = useCallback(
+    (tabId: string) => {
+      switchTab(paneId, tabId);
+
+      const tab = paneData.tabs.find((t) => t.id === tabId);
+      if (tab?.sessionId) {
+        onRestoreTabRef.current?.(paneId, tab);
+      }
+    },
+    [paneData.tabs, paneId, switchTab]
+  );
+
   // Create ref callback for a specific tab
   const getTerminalRef = useCallback(
     (tabId: string) => (handle: TerminalHandle | null) => {
@@ -206,17 +227,20 @@ export const Pane = memo(function Pane({
 
       onRegisterTerminal(paneId, tab.id, handle);
 
+      if (tab.sessionId) {
+        restoredTabsRef.current.add(tab.id);
+        onRestoreTabRef.current?.(paneId, tab);
+        return;
+      }
+
       // Determine tmux session name to attach
-      const tmuxName = tab.sessionId
-        ? sessions.find((s) => s.id === tab.sessionId)?.tmux_name ||
-          tab.attachedTmux
-        : tab.attachedTmux;
+      const tmuxName = tab.attachedTmux;
 
       if (tmuxName) {
         setTimeout(() => handle.sendCommand(`tmux attach -t ${tmuxName}`), 100);
       }
     },
-    [paneId, sessions, onRegisterTerminal]
+    [paneId, onRegisterTerminal]
   );
 
   // After hydration, restore tmux sessions for tabs that connected before tab data was available
@@ -327,7 +351,7 @@ export const Pane = memo(function Pane({
           hasAttachedTmux={!!activeTab?.attachedTmux}
           gitDrawerOpen={gitDrawerOpen}
           shellDrawerOpen={shellDrawerOpen}
-          onTabSwitch={(tabId) => switchTab(paneId, tabId)}
+          onTabSwitch={handleTabSwitch}
           onTabClose={(tabId) => closeTab(paneId, tabId)}
           onTabAdd={() => addTab(paneId)}
           onViewModeChange={setViewMode}
@@ -337,6 +361,8 @@ export const Pane = memo(function Pane({
           onSplitVertical={() => splitVertical(paneId)}
           onClose={() => close(paneId)}
           onDetach={handleDetach}
+          selectMode={selectMode}
+          onSelectModeToggle={() => setSelectMode((prev) => !prev)}
         />
       )}
 
@@ -351,6 +377,10 @@ export const Pane = memo(function Pane({
           {paneData.tabs.map((tab) => {
             const isActive = tab.id === activeTab?.id;
             const savedState = sessionRegistry.getTerminalState(paneId, tab.id);
+            const tabTmuxName = tab.sessionId
+              ? sessions.find((s) => s.id === tab.sessionId)?.tmux_name ||
+                tab.attachedTmux
+              : tab.attachedTmux;
 
             return (
               <div
@@ -381,6 +411,7 @@ export const Pane = memo(function Pane({
                         }
                       : undefined
                   }
+                  tmuxSessionName={tabTmuxName || undefined}
                 />
               </div>
             );
@@ -449,6 +480,10 @@ export const Pane = memo(function Pane({
                       paneId,
                       tab.id
                     );
+                    const tabTmuxName = tab.sessionId
+                      ? sessions.find((s) => s.id === tab.sessionId)
+                          ?.tmux_name || tab.attachedTmux
+                      : tab.attachedTmux;
 
                     return (
                       <div
@@ -479,6 +514,9 @@ export const Pane = memo(function Pane({
                                 }
                               : undefined
                           }
+                          tmuxSessionName={tabTmuxName || undefined}
+                          selectMode={selectMode}
+                          onSelectModeChange={setSelectMode}
                         />
                       </div>
                     );

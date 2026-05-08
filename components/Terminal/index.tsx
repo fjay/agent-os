@@ -7,6 +7,7 @@ import {
   useCallback,
   useState,
   useMemo,
+  useEffect,
 } from "react";
 import { useTheme } from "next-themes";
 import "@xterm/xterm/css/xterm.css";
@@ -30,6 +31,7 @@ export interface TerminalHandle {
   focus: () => void;
   getScrollState: () => TerminalScrollState | null;
   restoreScrollState: (state: TerminalScrollState) => void;
+  toggleSelectMode: () => void;
 }
 
 interface TerminalProps {
@@ -39,6 +41,12 @@ interface TerminalProps {
   initialScrollState?: TerminalScrollState;
   /** Show image picker button (default: true) */
   showImageButton?: boolean;
+  /** Tmux session name for capturing history */
+  tmuxSessionName?: string;
+  /** External select mode control (for desktop toolbar) */
+  selectMode?: boolean;
+  /** Callback when select mode changes */
+  onSelectModeChange?: (enabled: boolean) => void;
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
@@ -49,16 +57,37 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       onBeforeUnmount,
       initialScrollState,
       showImageButton = true,
+      tmuxSessionName,
+      selectMode: externalSelectMode,
+      onSelectModeChange,
     },
     ref
   ) {
     const terminalRef = useRef<HTMLDivElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+    const selectTextRef = useRef<HTMLPreElement>(null);
     const { isMobile } = useViewport();
     const { theme: currentTheme, resolvedTheme } = useTheme();
     const [showFilePicker, setShowFilePicker] = useState(false);
-    const [selectMode, setSelectMode] = useState(false);
+    const [internalSelectMode, setInternalSelectMode] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [tmuxText, setTmuxText] = useState<string | null>(null);
+    const [tmuxLoading, setTmuxLoading] = useState(false);
+
+    const selectModeActive =
+      externalSelectMode !== undefined
+        ? externalSelectMode
+        : internalSelectMode;
+    const handleSelectModeChange = useCallback(
+      (enabled: boolean) => {
+        if (onSelectModeChange) {
+          onSelectModeChange(enabled);
+        } else {
+          setInternalSelectMode(enabled);
+        }
+      },
+      [onSelectModeChange]
+    );
 
     // Use the full theme string (e.g., "dark-purple") for terminal theming
     const terminalTheme = useMemo(() => {
@@ -90,7 +119,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       initialScrollState,
       isMobile,
       theme: terminalTheme,
-      selectMode,
+      selectMode: selectModeActive,
     });
 
     const {
@@ -146,25 +175,94 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       focus,
       getScrollState,
       restoreScrollState,
+      toggleSelectMode: () => handleSelectModeChange(!selectModeActive),
     }));
 
     // Extract terminal text for select mode overlay
     const terminalText = useMemo(() => {
-      if (!selectMode || !xtermRef.current) return "";
+      if (!selectModeActive || !xtermRef.current) return "";
 
       const term = xtermRef.current;
       const buffer = term.buffer.active;
-      const startRow = Math.max(0, buffer.baseY - 500);
       const endRow = buffer.baseY + term.rows;
       const lines: string[] = [];
 
-      for (let i = startRow; i < endRow; i++) {
+      for (let i = 0; i < endRow; i++) {
         const line = buffer.getLine(i);
         if (line) lines.push(line.translateToString(true));
       }
 
       return lines.join("\n");
-    }, [selectMode, xtermRef]);
+    }, [selectModeActive, xtermRef]);
+
+    // Display tmux captured text if available, otherwise xterm buffer
+    const displayText = tmuxText ?? terminalText;
+
+    // Load tmux history via capture-pane
+    const loadTmuxHistory = useCallback(async () => {
+      if (!tmuxSessionName || tmuxLoading) return;
+      setTmuxLoading(true);
+      try {
+        const res = await fetch("/api/exec", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            command: `tmux capture-pane -t ${tmuxSessionName} -p -S -`,
+          }),
+        });
+        const data = await res.json();
+        if (data.success && data.output) {
+          setTmuxText(data.output.trimEnd());
+        }
+      } catch (e) {
+        console.error("Failed to capture tmux history:", e);
+      } finally {
+        setTmuxLoading(false);
+      }
+    }, [tmuxSessionName, tmuxLoading]);
+
+    // Copy from overlay using browser selection
+    const handleOverlayCopy = useCallback(() => {
+      const selection = window.getSelection()?.toString();
+      if (selection) {
+        navigator.clipboard.writeText(selection);
+        return true;
+      }
+      return false;
+    }, []);
+
+    // Reset tmux text when exiting select mode; auto-load when entering
+    useEffect(() => {
+      if (!selectModeActive) {
+        setTmuxText(null);
+      } else if (tmuxSessionName && !tmuxText && !tmuxLoading) {
+        loadTmuxHistory();
+      }
+    }, [selectModeActive]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+      if (!selectModeActive) return;
+
+      requestAnimationFrame(() => {
+        const selectText = selectTextRef.current;
+        if (selectText) {
+          selectText.scrollTop = selectText.scrollHeight;
+        }
+      });
+    }, [selectModeActive, displayText]);
+
+    // Desktop keyboard shortcut: Ctrl+Shift+S to toggle select mode
+    useEffect(() => {
+      if (isMobile) return;
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.ctrlKey && e.shiftKey && (e.key === "S" || e.key === "s")) {
+          e.preventDefault();
+          handleSelectModeChange(!selectModeActive);
+        }
+      };
+      document.addEventListener("keydown", handleKeyDown);
+      return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [isMobile, selectModeActive, handleSelectModeChange]);
 
     return (
       <div
@@ -193,38 +291,40 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           ref={terminalRef}
           className={cn(
             "terminal-container min-h-0 w-full flex-1 overflow-hidden",
-            selectMode && "ring-primary ring-2 ring-inset",
+            selectModeActive && "ring-primary ring-2 ring-inset",
             isDragging && "ring-primary ring-2 ring-inset"
           )}
           onClick={focus}
-          onTouchStart={selectMode ? (e) => e.stopPropagation() : undefined}
-          onTouchEnd={selectMode ? (e) => e.stopPropagation() : undefined}
+          onTouchStart={
+            selectModeActive ? (e) => e.stopPropagation() : undefined
+          }
+          onTouchEnd={selectModeActive ? (e) => e.stopPropagation() : undefined}
         />
 
         {/* Select mode overlay - shows terminal text in a selectable format */}
-        {selectMode && (
+        {selectModeActive && (
           <div
             className="bg-background absolute inset-0 z-40 flex flex-col"
             onTouchStart={(e) => e.stopPropagation()}
             onTouchEnd={(e) => e.stopPropagation()}
           >
-            <div className="bg-primary text-primary-foreground flex items-center justify-between px-3 py-2 text-xs font-medium">
-              <span>Select text below, then tap Copy</span>
+            <div className="bg-primary text-primary-foreground flex items-center justify-end px-3 py-2 text-xs font-medium">
               <button
-                onClick={() => setSelectMode(false)}
+                onClick={() => handleSelectModeChange(false)}
                 className="bg-primary-foreground/20 rounded px-2 py-0.5 text-xs"
               >
                 Done
               </button>
             </div>
             <pre
+              ref={selectTextRef}
               className="flex-1 overflow-auto p-3 font-mono text-xs break-all whitespace-pre-wrap select-text"
               style={{
                 userSelect: "text",
                 WebkitUserSelect: "text",
               }}
             >
-              {terminalText}
+              {displayText}
             </pre>
           </div>
         )}
@@ -277,9 +377,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           <TerminalToolbar
             onKeyPress={sendInput}
             onFilePicker={() => setShowFilePicker(true)}
-            onCopy={copySelection}
-            selectMode={selectMode}
-            onSelectModeChange={setSelectMode}
+            selectMode={selectModeActive}
+            onSelectModeChange={handleSelectModeChange}
             visible={true}
           />
         )}
