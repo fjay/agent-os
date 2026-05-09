@@ -1,6 +1,5 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,12 +17,27 @@ import {
   Users,
   ChevronDown,
   Circle,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Session, Project } from "@/lib/db";
+import type { TabData } from "@/lib/panes";
 import type { LucideIcon } from "lucide-react";
 
 type ViewMode = "terminal" | "files" | "git" | "workers";
+
+export interface MobileTabListEntry {
+  paneId: string;
+  tab: TabData;
+  projectId: string;
+  projectLabel: string;
+}
+
+export interface MobileProjectGroup {
+  projectId: string;
+  projectLabel: string;
+  entries: MobileTabListEntry[];
+}
 
 interface ViewModeButtonProps {
   mode: ViewMode;
@@ -61,6 +75,11 @@ function ViewModeButton({
 }
 
 interface MobileTabBarProps {
+  paneId: string;
+  tabs: TabData[];
+  activeTabId: string;
+  allTabs: MobileTabListEntry[];
+  projectGroups: MobileProjectGroup[];
   session: Session | null | undefined;
   sessions: Session[];
   projects: Project[];
@@ -69,10 +88,16 @@ interface MobileTabBarProps {
   workerCount: number;
   onMenuClick?: () => void;
   onViewModeChange: (mode: ViewMode) => void;
-  onSelectSession?: (sessionId: string) => void;
+  onTabSwitch: (paneId: string, tabId: string) => void;
+  onTabClose: (tabId: string) => void;
 }
 
 export function MobileTabBar({
+  paneId,
+  tabs,
+  activeTabId,
+  allTabs,
+  projectGroups,
   session,
   sessions,
   projects,
@@ -81,53 +106,75 @@ export function MobileTabBar({
   workerCount,
   onMenuClick,
   onViewModeChange,
-  onSelectSession,
+  onTabSwitch,
+  onTabClose,
 }: MobileTabBarProps) {
-  // Find current session index and calculate prev/next
-  const currentIndex = session
-    ? sessions.findIndex((s) => s.id === session.id)
+  const activeTab = tabs.find((tab) => tab.id === activeTabId) || null;
+  const activeEntry =
+    allTabs.find(
+      (entry) => entry.paneId === paneId && entry.tab.id === activeTabId
+    ) || null;
+  const currentIndex = activeEntry
+    ? allTabs.findIndex(
+        (entry) =>
+          entry.paneId === activeEntry.paneId &&
+          entry.tab.id === activeEntry.tab.id
+      )
     : -1;
 
   // Get project name for current session
   const projectName = session?.project_id
     ? projects.find((p) => p.id === session.project_id)?.name
-    : null;
+    : activeEntry?.projectLabel || null;
   const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex >= 0 && currentIndex < sessions.length - 1;
+  const hasNext = currentIndex >= 0 && currentIndex < allTabs.length - 1;
 
-  // Debounce to prevent rapid clicking causing command interference
-  const [isNavigating, setIsNavigating] = useState(false);
-  const debounceRef = useRef<NodeJS.Timeout | null>(null);
+  const getTabName = (tab: TabData) => {
+    if (tab.sessionId) {
+      const tabSession = sessions.find((s) => s.id === tab.sessionId);
+      return tabSession?.name || tab.attachedTmux || "Session";
+    }
+    if (tab.attachedTmux) return tab.attachedTmux;
+    return "New Tab";
+  };
 
-  const handleNavigate = useCallback(
-    (sessionId: string) => {
-      if (isNavigating || !onSelectSession) return;
+  const getProjectName = (tab: TabData) => {
+    if (!tab.sessionId) return null;
+    const tabSession = sessions.find((s) => s.id === tab.sessionId);
+    if (!tabSession?.project_id) return null;
+    const tabProject = projects.find((p) => p.id === tabSession.project_id);
+    return tabProject?.name && tabProject.name !== "Uncategorized"
+      ? tabProject.name
+      : null;
+  };
 
-      setIsNavigating(true);
-      onSelectSession(sessionId);
+  const getDisplayName = (tab: TabData, groupTabs: MobileTabListEntry[]) => {
+    const baseName = getTabName(tab);
+    const matchingTabs = groupTabs.filter((candidate) => {
+      return getTabName(candidate.tab) === baseName;
+    });
+    if (matchingTabs.length <= 1) return baseName;
 
-      // Allow next navigation after delay (tmux commands need time)
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setIsNavigating(false);
-      }, 500);
-    },
-    [isNavigating, onSelectSession]
-  );
+    const instanceNumber =
+      matchingTabs.findIndex((candidate) => candidate.tab.id === tab.id) + 1;
+    return instanceNumber <= 1 ? baseName : `${baseName} #${instanceNumber}`;
+  };
 
   const handlePrev = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (hasPrev && !isNavigating) {
-      handleNavigate(sessions[currentIndex - 1].id);
+    if (hasPrev) {
+      const prevEntry = allTabs[currentIndex - 1];
+      onTabSwitch(prevEntry.paneId, prevEntry.tab.id);
     }
   };
 
   const handleNext = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (hasNext && !isNavigating) {
-      handleNavigate(sessions[currentIndex + 1].id);
+    if (hasNext) {
+      const nextEntry = allTabs[currentIndex + 1];
+      onTabSwitch(nextEntry.paneId, nextEntry.tab.id);
     }
   };
 
@@ -153,19 +200,19 @@ export function MobileTabBar({
         </Button>
       )}
 
-      {/* Session/Tab navigation */}
+      {/* Tab navigation */}
       <div className="flex min-w-0 flex-1 items-center gap-1">
         <button
           type="button"
           onClick={handlePrev}
           onTouchEnd={(e) => e.stopPropagation()}
-          disabled={!hasPrev || isNavigating}
+          disabled={!hasPrev}
           className="hover:bg-accent flex h-8 w-8 shrink-0 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-50"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
 
-        {/* Session selector dropdown */}
+        {/* Project/tab selector dropdown */}
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <button
@@ -173,7 +220,7 @@ export function MobileTabBar({
               className="hover:bg-accent active:bg-accent flex min-w-0 flex-1 items-center justify-center gap-1 rounded-md px-2 py-1"
             >
               <span className="truncate text-sm font-medium">
-                {session?.name || "No session"}
+                {activeTab ? getTabName(activeTab) : "No tab"}
                 {projectName && projectName !== "Uncategorized" && (
                   <span className="text-muted-foreground font-normal">
                     {" "}
@@ -186,43 +233,42 @@ export function MobileTabBar({
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="center"
-            className="max-h-[300px] min-w-[200px] overflow-y-auto"
+            className="max-h-[360px] min-w-[240px] overflow-y-auto"
           >
-            {sessions
-              .filter((s) => !s.conductor_session_id)
-              .map((s) => {
-                const sessionProject = s.project_id
-                  ? projects.find((p) => p.id === s.project_id)
-                  : null;
-                const isActive = s.id === session?.id;
+            {projectGroups.map((group) => (
+              <div key={group.projectId}>
+                <div className="text-muted-foreground px-2 py-1 text-[11px] font-medium">
+                  {group.projectLabel}
+                </div>
+                {group.entries.map((entry) => {
+                  const isActive =
+                    entry.paneId === paneId && entry.tab.id === activeTabId;
 
-                return (
-                  <DropdownMenuItem
-                    key={s.id}
-                    onSelect={() => onSelectSession?.(s.id)}
-                    className={cn(
-                      "flex items-center gap-2",
-                      isActive && "bg-accent"
-                    )}
-                  >
-                    <Circle
+                  return (
+                    <DropdownMenuItem
+                      key={`${entry.paneId}:${entry.tab.id}`}
+                      onSelect={() => onTabSwitch(entry.paneId, entry.tab.id)}
                       className={cn(
-                        "h-2 w-2",
-                        isActive
-                          ? "fill-primary text-primary"
-                          : "text-muted-foreground"
+                        "flex items-center gap-2",
+                        isActive && "bg-accent"
                       )}
-                    />
-                    <span className="flex-1 truncate">{s.name}</span>
-                    {sessionProject &&
-                      sessionProject.name !== "Uncategorized" && (
-                        <span className="text-muted-foreground text-xs">
-                          [{sessionProject.name}]
-                        </span>
-                      )}
-                  </DropdownMenuItem>
-                );
-              })}
+                    >
+                      <Circle
+                        className={cn(
+                          "h-2 w-2",
+                          isActive
+                            ? "fill-primary text-primary"
+                            : "text-muted-foreground"
+                        )}
+                      />
+                      <span className="flex-1 truncate">
+                        {getDisplayName(entry.tab, group.entries)}
+                      </span>
+                    </DropdownMenuItem>
+                  );
+                })}
+              </div>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -230,12 +276,28 @@ export function MobileTabBar({
           type="button"
           onClick={handleNext}
           onTouchEnd={(e) => e.stopPropagation()}
-          disabled={!hasNext || isNavigating}
+          disabled={!hasNext}
           className="hover:bg-accent flex h-8 w-8 shrink-0 items-center justify-center rounded-md disabled:pointer-events-none disabled:opacity-50"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
+
+      {activeTab && tabs.length > 1 && (
+        <button
+          type="button"
+          aria-label="Close current tab"
+          title="Close current tab"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onTabClose(activeTab.id);
+          }}
+          className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
 
       {/* View mode toggle */}
       {session?.working_directory && (

@@ -63,7 +63,7 @@ function HomeContent() {
     findOpenTabBySessionId,
   } = usePanes();
   const focusedActiveTab = getActiveTab(focusedPaneId);
-  const { isMobile, isHydrated } = useViewport();
+  const { isMobile } = useViewport();
 
   // Data hooks
   const { sessions, fetchSessions } = useSessions();
@@ -362,11 +362,6 @@ function HomeContent() {
     checkStateChanges,
   });
 
-  // Set initial sidebar state based on viewport (only after hydration)
-  useEffect(() => {
-    if (isHydrated && !isMobile) setSidebarOpen(true);
-  }, [isMobile, isHydrated]);
-
   // Keyboard shortcut: Cmd+K to open quick switcher
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -379,23 +374,6 @@ function HomeContent() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Session selection handler
-  const handleSelectSession = useCallback(
-    (sessionId: string) => {
-      debugLog(`handleSelectSession called for: ${sessionId}`);
-      const session = sessions.find((s) => s.id === sessionId);
-      if (session) {
-        debugLog(`Found session: ${session.name}, calling attachToSession`);
-        attachToSession(session);
-      } else {
-        debugLog(
-          `Session not found in sessions array (length: ${sessions.length})`
-        );
-      }
-    },
-    [sessions, attachToSession]
-  );
-
   // Pane renderer
   const renderPane = useCallback(
     (paneId: string) => (
@@ -406,7 +384,6 @@ function HomeContent() {
         projects={projects}
         onRegisterTerminal={registerTerminalRef}
         onMenuClick={isMobile ? () => setSidebarOpen(true) : undefined}
-        onSelectSession={handleSelectSession}
         onActivateSessionTab={activateOpenSessionTab}
         onRestoreTab={handleTabRestore}
       />
@@ -416,7 +393,6 @@ function HomeContent() {
       projects,
       registerTerminalRef,
       isMobile,
-      handleSelectSession,
       activateOpenSessionTab,
       handleTabRestore,
     ]

@@ -9,12 +9,16 @@ import type {
   TerminalScrollState,
 } from "@/components/Terminal";
 import type { Session, Project } from "@/lib/db";
-import type { TabData } from "@/lib/panes";
+import { getAllPaneIds, type TabData } from "@/lib/panes";
 import { sessionRegistry } from "@/lib/client/session-registry";
 import { cn } from "@/lib/utils";
 import { ConductorPanel } from "@/components/ConductorPanel";
 import { useFileEditor } from "@/hooks/useFileEditor";
-import { MobileTabBar } from "./MobileTabBar";
+import {
+  MobileTabBar,
+  type MobileProjectGroup,
+  type MobileTabListEntry,
+} from "./MobileTabBar";
 import { DesktopTabBar } from "./DesktopTabBar";
 import {
   TerminalSkeleton,
@@ -57,7 +61,6 @@ interface PaneProps {
     ref: TerminalHandle | null
   ) => void;
   onMenuClick?: () => void;
-  onSelectSession?: (sessionId: string) => void;
   onActivateSessionTab?: (paneId: string, tabId: string) => void;
   onRestoreTab?: (paneId: string, tab: TabData) => void;
 }
@@ -70,13 +73,13 @@ export const Pane = memo(function Pane({
   projects,
   onRegisterTerminal,
   onMenuClick,
-  onSelectSession,
   onActivateSessionTab,
   onRestoreTab,
 }: PaneProps) {
   const { isMobile } = useViewport();
   const {
     hydrated,
+    state: paneState,
     focusedPaneId,
     canSplit,
     canClose,
@@ -206,6 +209,22 @@ export const Pane = memo(function Pane({
     [onActivateSessionTab, paneData.tabs, paneId, switchTab]
   );
 
+  const handleAnyPaneTabSwitch = useCallback(
+    (targetPaneId: string, tabId: string) => {
+      const targetPane = paneState.panes[targetPaneId];
+      if (!targetPane) return;
+
+      focusPane(targetPaneId);
+      switchTab(targetPaneId, tabId);
+
+      const tab = targetPane.tabs.find((t) => t.id === tabId);
+      if (tab?.sessionId) {
+        onActivateSessionTab?.(targetPaneId, tabId);
+      }
+    },
+    [focusPane, onActivateSessionTab, paneState.panes, switchTab]
+  );
+
   // Create ref callback for a specific tab
   const getTerminalRef = useCallback(
     (tabId: string) => (handle: TerminalHandle | null) => {
@@ -285,12 +304,74 @@ export const Pane = memo(function Pane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [paneId, onRegisterTerminal]);
 
-  // Swipe gesture handling for mobile session switching (terminal view only)
+  // Swipe gesture handling for mobile tab switching (terminal view only)
   const touchStartX = useRef<number | null>(null);
-  const currentIndex = session
-    ? sessions.findIndex((s) => s.id === session.id)
-    : -1;
   const SWIPE_THRESHOLD = 120;
+
+  const mobileAllTabs = useMemo<MobileTabListEntry[]>(() => {
+    const projectMap = new Map(
+      projects.map((project) => [project.id, project])
+    );
+
+    return getAllPaneIds(paneState.layout).flatMap((id) => {
+      const pane = paneState.panes[id];
+      if (!pane) return [];
+
+      return pane.tabs.map((tab) => {
+        const tabSession = tab.sessionId
+          ? sessions.find((candidate) => candidate.id === tab.sessionId) || null
+          : null;
+        const projectId = tabSession?.project_id || "uncategorized";
+        const projectLabel = projectMap.get(projectId)?.name || "Uncategorized";
+
+        return {
+          paneId: id,
+          tab,
+          projectId,
+          projectLabel,
+        };
+      });
+    });
+  }, [paneState.layout, paneState.panes, projects, sessions]);
+
+  const activeMobileTabIndex = useMemo(
+    () =>
+      mobileAllTabs.findIndex(
+        (entry) =>
+          entry.paneId === paneId && entry.tab.id === paneData.activeTabId
+      ),
+    [mobileAllTabs, paneData.activeTabId, paneId]
+  );
+
+  const mobileProjectGroups = useMemo<MobileProjectGroup[]>(() => {
+    const groupedEntries = new Map<string, MobileProjectGroup>();
+
+    for (const entry of mobileAllTabs) {
+      const existingGroup = groupedEntries.get(entry.projectId);
+      if (existingGroup) {
+        existingGroup.entries.push(entry);
+        continue;
+      }
+
+      groupedEntries.set(entry.projectId, {
+        projectId: entry.projectId,
+        projectLabel: entry.projectLabel,
+        entries: [entry],
+      });
+    }
+
+    const knownProjectIds = new Set(groupedEntries.keys());
+    const orderedGroups = projects
+      .filter((project) => knownProjectIds.has(project.id))
+      .map((project) => groupedEntries.get(project.id))
+      .filter((group): group is MobileProjectGroup => group !== undefined);
+
+    const remainingGroups = Array.from(groupedEntries.values()).filter(
+      (group) => !projects.some((project) => project.id === group.projectId)
+    );
+
+    return [...orderedGroups, ...remainingGroups];
+  }, [mobileAllTabs, projects]);
 
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -309,12 +390,14 @@ export const Pane = memo(function Pane({
 
       if (Math.abs(diff) <= SWIPE_THRESHOLD) return;
 
-      const nextIndex = diff > 0 ? currentIndex - 1 : currentIndex + 1;
-      if (nextIndex >= 0 && nextIndex < sessions.length) {
-        onSelectSession?.(sessions[nextIndex].id);
+      const nextIndex =
+        diff > 0 ? activeMobileTabIndex - 1 : activeMobileTabIndex + 1;
+      const nextEntry = mobileAllTabs[nextIndex];
+      if (nextEntry) {
+        handleAnyPaneTabSwitch(nextEntry.paneId, nextEntry.tab.id);
       }
     },
-    [viewMode, currentIndex, sessions, onSelectSession]
+    [viewMode, activeMobileTabIndex, mobileAllTabs, handleAnyPaneTabSwitch]
   );
 
   return (
@@ -328,6 +411,11 @@ export const Pane = memo(function Pane({
       {/* Tab Bar - Mobile vs Desktop */}
       {isMobile ? (
         <MobileTabBar
+          paneId={paneId}
+          tabs={paneData.tabs}
+          activeTabId={paneData.activeTabId}
+          allTabs={mobileAllTabs}
+          projectGroups={mobileProjectGroups}
           session={session}
           sessions={sessions}
           projects={projects}
@@ -336,7 +424,8 @@ export const Pane = memo(function Pane({
           workerCount={workerCount}
           onMenuClick={onMenuClick}
           onViewModeChange={setViewMode}
-          onSelectSession={onSelectSession}
+          onTabSwitch={handleAnyPaneTabSwitch}
+          onTabClose={(tabId) => closeTab(paneId, tabId)}
         />
       ) : (
         <DesktopTabBar

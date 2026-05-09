@@ -53,6 +53,17 @@ interface ComboKey {
   sequence: string;
 }
 
+const COMBO_INPUT_PATTERN = /[^a-zA-Z0-9.@/\\\-_]/g;
+const DEFAULT_MODIFIERS = new Set<string>(["alt"]);
+
+function sanitizeComboInput(value: string) {
+  return value.replace(COMBO_INPUT_PATTERN, "");
+}
+
+function isSingleComboCharacter(value: string) {
+  return value.trim().length === 1;
+}
+
 const COMBO_STORAGE_KEY = "terminal-combo-keys";
 
 const DEFAULT_COMBOS: ComboKey[] = [
@@ -145,10 +156,14 @@ function ComboKeysModal({
 }) {
   const [combos, setCombos] = useState<ComboKey[]>(() => getStoredCombos());
   const [isAdding, setIsAdding] = useState(false);
-  const [modifiers, setModifiers] = useState<Set<string>>(new Set(["alt"]));
+  const [modifiers, setModifiers] = useState<Set<string>>(
+    () => new Set(DEFAULT_MODIFIERS)
+  );
   const [newKey, setNewKey] = useState("");
+  const canUseModifiers = isSingleComboCharacter(newKey);
 
   const toggleModifier = (m: string) => {
+    if (!canUseModifiers) return;
     setModifiers((prev) => {
       const next = new Set(prev);
       next.has(m) ? next.delete(m) : next.add(m);
@@ -160,23 +175,27 @@ function ComboKeysModal({
     if (!newKey.trim()) return;
     const key = newKey.trim().toLowerCase();
     let sequence = key;
-    const parts: string[] = [];
+    let name = newKey.trim();
 
-    if (modifiers.has("ctrl")) {
-      parts.push("Ctrl");
-      sequence = String.fromCharCode(key.charCodeAt(0) - 96);
-    }
-    if (modifiers.has("alt")) {
-      parts.push("Alt");
-      sequence = "\x1b" + sequence;
-    }
-    if (modifiers.has("shift")) {
-      parts.push("Shift");
-    }
+    if (isSingleComboCharacter(newKey)) {
+      const parts: string[] = [];
 
-    const name = parts.length
-      ? parts.join("+") + "+" + newKey.trim().toUpperCase()
-      : newKey.trim();
+      if (modifiers.has("ctrl")) {
+        parts.push("Ctrl");
+        sequence = String.fromCharCode(key.charCodeAt(0) - 96);
+      }
+      if (modifiers.has("alt")) {
+        parts.push("Alt");
+        sequence = "\x1b" + sequence;
+      }
+      if (modifiers.has("shift")) {
+        parts.push("Shift");
+      }
+
+      name = parts.length
+        ? parts.join("+") + "+" + newKey.trim().toUpperCase()
+        : newKey.trim();
+    }
     const newCombo: ComboKey = {
       id: Date.now().toString(),
       name,
@@ -186,7 +205,7 @@ function ComboKeysModal({
     setCombos(updated);
     saveCombos(updated);
     setNewKey("");
-    setModifiers(new Set(["alt"]));
+    setModifiers(new Set(DEFAULT_MODIFIERS));
     setIsAdding(false);
   };
 
@@ -232,8 +251,10 @@ function ComboKeysModal({
                 <button
                   key={m}
                   onClick={() => toggleModifier(m)}
+                  disabled={!canUseModifiers}
                   className={cn(
                     "rounded-md px-3 py-1.5 text-xs font-medium",
+                    !canUseModifiers && "cursor-not-allowed opacity-50",
                     modifiers.has(m)
                       ? "bg-primary text-primary-foreground"
                       : "bg-secondary text-secondary-foreground"
@@ -246,13 +267,13 @@ function ComboKeysModal({
             <input
               type="text"
               value={newKey}
-              onChange={(e) =>
-                setNewKey(
-                  e.target.value
-                    .replace(/[^a-zA-Z0-9.@/\\\-_]/g, "")
-                    .slice(0, 3)
-                )
-              }
+              onChange={(e) => {
+                const nextKey = sanitizeComboInput(e.target.value);
+                setNewKey(nextKey);
+                if (!isSingleComboCharacter(nextKey)) {
+                  setModifiers(new Set());
+                }
+              }}
               placeholder="Key (e.g. P, ., /)..."
               className="bg-background focus:ring-primary mb-2 w-full rounded-lg px-3 py-2 text-sm focus:ring-2 focus:outline-none"
               onKeyDown={(e) => {
