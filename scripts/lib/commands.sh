@@ -355,7 +355,11 @@ Type=simple
 ExecStart=$script_path start-foreground
 Restart=on-failure
 RestartSec=10
-Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="SHELL=${SHELL:-/bin/bash}"
+Environment="AGENT_OS_HOME=$AGENT_OS_HOME"
+Environment="AGENT_OS_REPO_DIR=$REPO_DIR"
+Environment="AGENT_OS_PORT=$PORT"
 KillMode=process
 
 [Install]

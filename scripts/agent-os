@@ -60,6 +60,16 @@ SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
 # Local repo path (parent of scripts dir) - used for --local installs
 LOCAL_REPO="$(dirname "$SCRIPT_DIR")"
 
+# When running directly from a local clone, use that clone as the repo if the
+# default installed repo does not exist. This keeps service setup path-agnostic.
+if [[ -z "${AGENT_OS_REPO_DIR:-}" \
+    && ! -d "$REPO_DIR" \
+    && -f "$LOCAL_REPO/package.json" \
+    && "$LOCAL_REPO" != *"/node_modules/"* \
+    && "$LOCAL_REPO" != *"/node_modules" ]]; then
+    REPO_DIR="$LOCAL_REPO"
+fi
+
 # Source library files
 source "$SCRIPT_DIR/lib/common.sh"
 source "$SCRIPT_DIR/lib/prerequisites.sh"

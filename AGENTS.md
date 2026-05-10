@@ -26,11 +26,19 @@ Linux 上使用内置命令安装 user systemd service：
 agent-os enable
 ```
 
+如果是在当前 clone 仓库内操作，也可以直接运行：
+
+```bash
+./scripts/agent-os enable
+```
+
 这会创建：
 
 ```text
 ~/.config/systemd/user/agent-os.service
 ```
+
+service 会自动写入当前解析到的安装目录、端口和 `AGENT_OS_HOME`，不要手写固定路径。
 
 启用后启动服务：
 
@@ -84,17 +92,15 @@ agent-os update
    npm run build
    ```
 
-2. 构建成功后重启系统级 systemd 服务：
+2. 构建成功后重启 user systemd 服务：
 
    ```bash
-   systemctl restart agent-os.service
+   XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus systemctl --user restart agent-os
    ```
 
 3. 验证服务状态和 HTTP 响应：
 
    ```bash
-   systemctl status agent-os.service --no-pager -l
+   XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus systemctl --user status agent-os --no-pager -l
    curl -I --max-time 5 http://localhost:3011/
    ```
-
-服务单元位于 `/etc/systemd/system/agent-os.service`，工作目录应指向 `/root/code/agent-os`。
