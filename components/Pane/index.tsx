@@ -11,6 +11,7 @@ import type {
 import type { Session, Project } from "@/lib/db";
 import { getAllPaneIds, type TabData } from "@/lib/panes";
 import { sessionRegistry } from "@/lib/client/session-registry";
+import { getEffectiveWorkingDirectory } from "@/lib/session-path";
 import { cn } from "@/lib/utils";
 import { ConductorPanel } from "@/components/ConductorPanel";
 import { useFileEditor } from "@/hooks/useFileEditor";
@@ -149,6 +150,11 @@ export const Pane = memo(function Pane({
     if (!session?.project_id) return null;
     return projects.find((p) => p.id === session.project_id) || null;
   }, [session?.project_id, projects]);
+
+  const effectiveWorkingDirectory = useMemo(
+    () => getEffectiveWorkingDirectory(session, currentProject),
+    [session, currentProject]
+  );
 
   // Type assertion for repositories (projects passed here should have repositories)
   const projectRepositories = useMemo(() => {
@@ -513,20 +519,20 @@ export const Pane = memo(function Pane({
           })}
 
           {/* Files */}
-          {session?.working_directory && (
+          {effectiveWorkingDirectory && (
             <div className={viewMode === "files" ? "h-full" : "hidden"}>
               <FileExplorer
-                workingDirectory={session.working_directory}
+                workingDirectory={effectiveWorkingDirectory}
                 fileEditor={fileEditor}
               />
             </div>
           )}
 
           {/* Git - mobile only */}
-          {session?.working_directory && (
+          {effectiveWorkingDirectory && (
             <div className={viewMode === "git" ? "h-full" : "hidden"}>
               <GitPanel
-                workingDirectory={session.working_directory}
+                workingDirectory={effectiveWorkingDirectory}
                 projectId={currentProject?.id}
                 repositories={projectRepositories}
               />
@@ -619,10 +625,10 @@ export const Pane = memo(function Pane({
                   })}
 
                   {/* Files */}
-                  {session?.working_directory && (
+                  {effectiveWorkingDirectory && (
                     <div className={viewMode === "files" ? "h-full" : "hidden"}>
                       <FileExplorer
-                        workingDirectory={session.working_directory}
+                        workingDirectory={effectiveWorkingDirectory}
                         fileEditor={fileEditor}
                       />
                     </div>
@@ -654,14 +660,14 @@ export const Pane = memo(function Pane({
               </ResizablePanel>
 
               {/* Shell drawer - under main content */}
-              {shellDrawerOpen && session?.working_directory && (
+              {shellDrawerOpen && effectiveWorkingDirectory && (
                 <>
                   <ResizablePanelHandle className="bg-border/30 hover:bg-primary/30 active:bg-primary/50 h-px cursor-row-resize transition-colors" />
                   <ResizablePanel defaultSize={30} minSize={10}>
                     <ShellDrawer
                       open={true}
                       onOpenChange={setShellDrawerOpen}
-                      workingDirectory={session.working_directory}
+                      workingDirectory={effectiveWorkingDirectory}
                     />
                   </ResizablePanel>
                 </>
@@ -670,14 +676,14 @@ export const Pane = memo(function Pane({
           </ResizablePanel>
 
           {/* Git drawer - right side, full height */}
-          {gitDrawerOpen && session?.working_directory && (
+          {gitDrawerOpen && effectiveWorkingDirectory && (
             <>
               <ResizablePanelHandle className="bg-border/30 hover:bg-primary/30 active:bg-primary/50 w-px cursor-col-resize transition-colors" />
               <ResizablePanel defaultSize={30} minSize={10}>
                 <GitDrawer
                   open={true}
                   onOpenChange={setGitDrawerOpen}
-                  workingDirectory={session.working_directory}
+                  workingDirectory={effectiveWorkingDirectory}
                   projectId={currentProject?.id}
                   repositories={projectRepositories}
                 />

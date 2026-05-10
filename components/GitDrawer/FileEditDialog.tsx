@@ -15,6 +15,7 @@ import {
 import { DiffEditor, type Monaco } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { Button } from "@/components/ui/button";
+import { resolveFilePath } from "@/lib/session-path";
 import { cn } from "@/lib/utils";
 import type { GitFile } from "@/lib/git-status";
 import type { MultiRepoGitFile } from "@/lib/multi-repo-git";
@@ -102,11 +103,7 @@ export function FileEditDialog({
   // For multi-repo files, use repoPath; otherwise use workingDirectory
   const baseDir =
     "repoPath" in file && file.repoPath ? file.repoPath : workingDirectory;
-  // Expand ~ to home directory for display
-  const expandedBaseDir = baseDir.startsWith("~")
-    ? baseDir.replace("~", process.env.HOME || "/Users")
-    : baseDir;
-  const filePath = `${expandedBaseDir}/${file.path}`;
+  const filePath = resolveFilePath(file.path, baseDir);
   const fileName = file.path.split("/").pop() || file.path;
   const repoName = "repoName" in file ? file.repoName : null;
   const hasChanges = modifiedContent !== initialModified;

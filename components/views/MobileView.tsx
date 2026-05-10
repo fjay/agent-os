@@ -7,6 +7,10 @@ import { SidebarFooter } from "@/components/SidebarFooter";
 import { PaneLayout } from "@/components/PaneLayout";
 import { SwipeSidebar } from "@/components/mobile/SwipeSidebar";
 import { QuickSwitcher } from "@/components/QuickSwitcher";
+import {
+  getEffectiveWorkingDirectory,
+  resolveFilePath,
+} from "@/lib/session-path";
 import type { ViewProps } from "./types";
 import { fileOpenActions } from "@/stores/fileOpen";
 
@@ -36,6 +40,12 @@ export function MobileView({
   setStartDevServerProjectId,
   renderPane,
 }: ViewProps) {
+  const activeProject = activeSession?.project_id
+    ? projects.find((project) => project.id === activeSession.project_id)
+    : null;
+  const activeSessionWorkingDir =
+    getEffectiveWorkingDirectory(activeSession, activeProject) ?? undefined;
+
   return (
     <main className="bg-background flex h-screen flex-col overflow-hidden">
       {/* Swipe sidebar */}
@@ -86,16 +96,13 @@ export function MobileView({
         open={showQuickSwitcher}
         onOpenChange={setShowQuickSwitcher}
         currentSessionId={focusedActiveTab?.sessionId ?? undefined}
-        activeSessionWorkingDir={activeSession?.working_directory ?? undefined}
+        activeSessionWorkingDir={activeSessionWorkingDir}
         onSelectSession={(sessionId) => {
           const session = sessions.find((s) => s.id === sessionId);
           if (session) attachToSession(session);
         }}
         onSelectFile={(file, line) => {
-          // Convert relative path to absolute by prepending working directory
-          const absolutePath = activeSession?.working_directory
-            ? `${activeSession.working_directory}/${file.replace(/^\.\//, "")}`
-            : file;
+          const absolutePath = resolveFilePath(file, activeSessionWorkingDir);
           fileOpenActions.requestOpen(absolutePath, line);
         }}
       />

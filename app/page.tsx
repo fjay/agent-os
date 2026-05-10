@@ -35,6 +35,7 @@ import type { Session } from "@/lib/db";
 import type { TabData } from "@/lib/panes";
 import type { TerminalHandle } from "@/components/Terminal";
 import { getProvider } from "@/lib/providers";
+import { getEffectiveWorkingDirectory } from "@/lib/session-path";
 import { DesktopView } from "@/components/views/DesktopView";
 import { MobileView } from "@/components/views/MobileView";
 import { getPendingPrompt, clearPendingPrompt } from "@/stores/initialPrompt";
@@ -122,7 +123,12 @@ function HomeContent() {
     ): Promise<{ sessionName: string; cwd: string; command: string }> => {
       const provider = getProvider(session.agent_type || "claude");
       const sessionName = session.tmux_name || `${provider.id}-${session.id}`;
-      const cwd = session.working_directory?.replace("~", "$HOME") || "$HOME";
+      const project = session.project_id
+        ? projects.find((item) => item.id === session.project_id)
+        : null;
+      const cwd =
+        getEffectiveWorkingDirectory(session, project)?.replace("~", "$HOME") ||
+        "$HOME";
 
       // Shell sessions just open a terminal - no agent command
       if (provider.id === "shell") {
@@ -163,7 +169,7 @@ function HomeContent() {
 
       return { sessionName, cwd, command };
     },
-    [sessions, getInitScriptCommand]
+    [sessions, projects, getInitScriptCommand]
   );
 
   // Attach a session to a terminal
