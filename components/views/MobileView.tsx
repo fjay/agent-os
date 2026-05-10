@@ -23,6 +23,7 @@ export function MobileView({
   newSessionProjectId,
   showQuickSwitcher,
   setShowQuickSwitcher,
+  onReloadPage,
   attachToSession,
   openSessionInNewTab,
   handleNewSessionInProject,

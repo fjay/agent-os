@@ -13,6 +13,7 @@ import {
   Copy,
   Check,
   Command,
+  RotateCw,
 } from "lucide-react";
 import { PaneLayout } from "@/components/PaneLayout";
 import {
@@ -41,6 +42,7 @@ export function DesktopView({
   setShowNotificationSettings,
   showQuickSwitcher,
   setShowQuickSwitcher,
+  onReloadPage,
   notificationSettings,
   permissionGranted,
   updateSettings,
@@ -162,6 +164,16 @@ export function DesktopView({
           </div>
 
           <div className="flex items-center gap-2">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button variant="ghost" size="icon-sm" onClick={onReloadPage}>
+                  <RotateCw className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>Reload page</p>
+              </TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button

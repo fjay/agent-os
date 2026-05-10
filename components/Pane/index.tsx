@@ -63,6 +63,7 @@ interface PaneProps {
   onMenuClick?: () => void;
   onActivateSessionTab?: (paneId: string, tabId: string) => void;
   onRestoreTab?: (paneId: string, tab: TabData) => void;
+  onReloadPage?: () => void;
 }
 
 type ViewMode = "terminal" | "files" | "git" | "workers";
@@ -75,6 +76,7 @@ export const Pane = memo(function Pane({
   onMenuClick,
   onActivateSessionTab,
   onRestoreTab,
+  onReloadPage,
 }: PaneProps) {
   const { isMobile } = useViewport();
   const {
@@ -426,6 +428,7 @@ export const Pane = memo(function Pane({
           onViewModeChange={setViewMode}
           onTabSwitch={handleAnyPaneTabSwitch}
           onTabClose={(tabId) => closeTab(paneId, tabId)}
+          onReloadPage={onReloadPage || (() => window.location.reload())}
         />
       ) : (
         <DesktopTabBar
@@ -503,6 +506,7 @@ export const Pane = memo(function Pane({
                       : undefined
                   }
                   tmuxSessionName={tabTmuxName || undefined}
+                  onReloadPage={onReloadPage}
                 />
               </div>
             );
@@ -608,6 +612,7 @@ export const Pane = memo(function Pane({
                           tmuxSessionName={tabTmuxName || undefined}
                           selectMode={selectMode}
                           onSelectModeChange={setSelectMode}
+                          onReloadPage={onReloadPage}
                         />
                       </div>
                     );

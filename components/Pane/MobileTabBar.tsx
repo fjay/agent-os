@@ -18,6 +18,7 @@ import {
   ChevronDown,
   Circle,
   X,
+  RotateCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Session, Project } from "@/lib/db";
@@ -90,6 +91,7 @@ interface MobileTabBarProps {
   onViewModeChange: (mode: ViewMode) => void;
   onTabSwitch: (paneId: string, tabId: string) => void;
   onTabClose: (tabId: string) => void;
+  onReloadPage: () => void;
 }
 
 export function MobileTabBar({
@@ -108,6 +110,7 @@ export function MobileTabBar({
   onViewModeChange,
   onTabSwitch,
   onTabClose,
+  onReloadPage,
 }: MobileTabBarProps) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null;
   const activeEntry =
@@ -298,6 +301,20 @@ export function MobileTabBar({
           <X className="h-4 w-4" />
         </button>
       )}
+
+      <button
+        type="button"
+        aria-label="Reload page"
+        title="Reload page"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onReloadPage();
+        }}
+        className="text-muted-foreground hover:bg-accent hover:text-foreground flex h-8 w-8 shrink-0 items-center justify-center rounded-md"
+      >
+        <RotateCw className="h-4 w-4" />
+      </button>
 
       {/* View mode toggle */}
       {session?.working_directory && (

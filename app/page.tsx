@@ -374,6 +374,10 @@ function HomeContent() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
+  const handleReloadPage = useCallback(() => {
+    window.location.reload();
+  }, []);
+
   // Pane renderer
   const renderPane = useCallback(
     (paneId: string) => (
@@ -386,6 +390,7 @@ function HomeContent() {
         onMenuClick={isMobile ? () => setSidebarOpen(true) : undefined}
         onActivateSessionTab={activateOpenSessionTab}
         onRestoreTab={handleTabRestore}
+        onReloadPage={handleReloadPage}
       />
     ),
     [
@@ -395,6 +400,7 @@ function HomeContent() {
       isMobile,
       activateOpenSessionTab,
       handleTabRestore,
+      handleReloadPage,
     ]
   );
 
@@ -499,6 +505,7 @@ function HomeContent() {
     setShowNotificationSettings,
     showQuickSwitcher,
     setShowQuickSwitcher,
+    onReloadPage: handleReloadPage,
     notificationSettings,
     permissionGranted,
     updateSettings,

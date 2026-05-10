@@ -44,6 +44,7 @@ interface TerminalProps {
   onConnected?: () => void;
   onDisconnected?: () => void;
   onBeforeUnmount?: (scrollState: TerminalScrollState) => void;
+  onReloadPage?: () => void;
   initialScrollState?: TerminalScrollState;
   /** Show image picker button (default: true) */
   showImageButton?: boolean;
@@ -61,6 +62,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       onConnected,
       onDisconnected,
       onBeforeUnmount,
+      onReloadPage,
       initialScrollState,
       showImageButton = true,
       tmuxSessionName,
@@ -94,6 +96,13 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       },
       [onSelectModeChange]
     );
+    const handleReloadPage = useCallback(() => {
+      if (onReloadPage) {
+        onReloadPage();
+        return;
+      }
+      window.location.reload();
+    }, [onReloadPage]);
 
     // Use the full theme string (e.g., "dark-purple") for terminal theming
     const terminalTheme = useMemo(() => {
@@ -409,7 +418,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         {/* Disconnected overlay - shows tap to reconnect button */}
         {connectionState === "disconnected" && (
           <button
-            onClick={reconnect}
+            onClick={handleReloadPage}
             className="bg-background/80 active:bg-background/90 absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 backdrop-blur-sm transition-all"
           >
             <WifiOff className="text-muted-foreground h-8 w-8" />
@@ -417,7 +426,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
               Connection lost
             </span>
             <span className="bg-primary text-primary-foreground rounded-full px-4 py-2 text-sm font-medium">
-              Tap to reconnect
+              Reload page
             </span>
           </button>
         )}
