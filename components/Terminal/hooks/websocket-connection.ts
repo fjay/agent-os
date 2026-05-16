@@ -194,7 +194,41 @@ export function createWebSocketConnection(
   });
 
   // Track when page was last hidden (for detecting long sleeps)
-  let hiddenAt: number | null = null;
+  let hiddenAt: number | null =
+    document.visibilityState === "hidden" ? Date.now() : null;
+  let resumeTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  const reconnectIfNeeded = (force = false) => {
+    if (intentionalCloseRef.current) return;
+    if (document.visibilityState !== "visible") return;
+
+    if (force) {
+      forceReconnect();
+      return;
+    }
+
+    const currentWs = wsRef.current;
+    const isDisconnected =
+      !currentWs ||
+      currentWs.readyState === WebSocket.CLOSED ||
+      currentWs.readyState === WebSocket.CLOSING;
+    const isStaleConnection = currentWs?.readyState === WebSocket.CONNECTING;
+
+    if (isDisconnected || isStaleConnection) {
+      forceReconnect();
+    }
+  };
+
+  const scheduleReconnectIfNeeded = (force = false) => {
+    if (resumeTimeout) {
+      clearTimeout(resumeTimeout);
+    }
+
+    resumeTimeout = setTimeout(() => {
+      resumeTimeout = null;
+      reconnectIfNeeded(force);
+    }, 250);
+  };
 
   // Handle visibility change for reconnection
   const handleVisibilityChange = () => {
@@ -214,26 +248,29 @@ export function createWebSocketConnection(
     // If hidden for more than 5 seconds, force reconnect (iOS Safari kills sockets)
     // This handles the "hung socket" problem where readyState says OPEN but it's dead
     if (wasHiddenFor > 5000) {
-      forceReconnect();
+      scheduleReconnectIfNeeded(true);
       return;
     }
 
     // Otherwise only reconnect if actually disconnected
-    const currentWs = wsRef.current;
-    const isDisconnected =
-      !currentWs ||
-      currentWs.readyState === WebSocket.CLOSED ||
-      currentWs.readyState === WebSocket.CLOSING;
-    const isStaleConnection = currentWs?.readyState === WebSocket.CONNECTING;
-
-    if (isDisconnected || isStaleConnection) {
-      forceReconnect();
-    }
+    scheduleReconnectIfNeeded();
   };
+  const handleResume = () => scheduleReconnectIfNeeded();
+
   document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("pageshow", handleResume);
+  window.addEventListener("focus", handleResume);
+  window.addEventListener("online", handleResume);
 
   const cleanup = () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("pageshow", handleResume);
+    window.removeEventListener("focus", handleResume);
+    window.removeEventListener("online", handleResume);
+    if (resumeTimeout) {
+      clearTimeout(resumeTimeout);
+      resumeTimeout = null;
+    }
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
