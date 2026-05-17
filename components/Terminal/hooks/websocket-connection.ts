@@ -43,6 +43,10 @@ export function createWebSocketConnection(
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: "input", data }));
     }
+
+    if (wasBrowserSuspended()) {
+      scheduleReconnectIfNeeded(true);
+    }
   };
 
   const sendCommand = (command: string) => {
@@ -197,6 +201,23 @@ export function createWebSocketConnection(
   let hiddenAt: number | null =
     document.visibilityState === "hidden" ? Date.now() : null;
   let resumeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let lastClockTick = Date.now();
+  const sleepCheckInterval = window.setInterval(() => {
+    const now = Date.now();
+    const elapsed = now - lastClockTick;
+    lastClockTick = now;
+
+    if (elapsed > 30000) {
+      scheduleReconnectIfNeeded(true);
+    }
+  }, 10000);
+
+  const wasBrowserSuspended = () => {
+    const now = Date.now();
+    const elapsed = now - lastClockTick;
+    lastClockTick = now;
+    return elapsed > 30000;
+  };
 
   const reconnectIfNeeded = (force = false) => {
     if (intentionalCloseRef.current) return;
@@ -255,7 +276,7 @@ export function createWebSocketConnection(
     // Otherwise only reconnect if actually disconnected
     scheduleReconnectIfNeeded();
   };
-  const handleResume = () => scheduleReconnectIfNeeded();
+  const handleResume = () => scheduleReconnectIfNeeded(wasBrowserSuspended());
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handleResume);
@@ -271,6 +292,7 @@ export function createWebSocketConnection(
       clearTimeout(resumeTimeout);
       resumeTimeout = null;
     }
+    window.clearInterval(sleepCheckInterval);
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
