@@ -3,6 +3,12 @@
 import type { Terminal as XTerm } from "@xterm/xterm";
 import { WS_RECONNECT_BASE_DELAY, WS_RECONNECT_MAX_DELAY } from "../constants";
 
+const WS_HEARTBEAT_INTERVAL_MS = 20000;
+const WS_PROBE_TIMEOUT_MS = 1500;
+const WS_RESUME_DELAY_MS = 250;
+const WS_SUSPEND_THRESHOLD_MS = 30000;
+const MOBILE_HIDDEN_RECONNECT_MS = 5000;
+
 export interface WebSocketCallbacks {
   onConnected?: () => void;
   onDisconnected?: () => void;
@@ -30,8 +36,129 @@ export function createWebSocketConnection(
   intentionalCloseRef: React.MutableRefObject<boolean>
 ): WebSocketManager {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const ws = new WebSocket(`${protocol}//${window.location.host}/ws/terminal`);
-  wsRef.current = ws;
+  const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
+  const prefersAggressiveReconnect = shouldUseAggressiveReconnect();
+  const pendingMessages: string[] = [];
+
+  let hiddenAt: number | null =
+    document.visibilityState === "hidden" ? Date.now() : null;
+  let resumeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let probeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let probeSocket: WebSocket | null = null;
+  let lastClockTick = Date.now();
+  let lastPongAt = Date.now();
+
+  const clearPendingMessages = () => {
+    pendingMessages.length = 0;
+  };
+
+  const flushPendingMessages = (socket: WebSocket) => {
+    if (wsRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    while (pendingMessages.length > 0) {
+      const payload = pendingMessages.shift();
+      if (!payload) continue;
+
+      if (wsRef.current !== socket || socket.readyState !== WebSocket.OPEN) {
+        pendingMessages.unshift(payload);
+        return;
+      }
+
+      socket.send(payload);
+    }
+  };
+
+  const clearProbe = () => {
+    if (probeTimeout) {
+      clearTimeout(probeTimeout);
+      probeTimeout = null;
+    }
+    probeSocket = null;
+  };
+
+  const createSocket = () => {
+    const socket = new WebSocket(wsUrl);
+    wsRef.current = socket;
+
+    socket.onopen = () => {
+      lastPongAt = Date.now();
+      clearProbe();
+      callbacks.onSetConnected(true);
+      callbacks.onConnectionStateChange("connected");
+      reconnectDelayRef.current = WS_RECONNECT_BASE_DELAY;
+      callbacks.onConnected?.();
+      sendResize(term.cols, term.rows);
+      flushPendingMessages(socket);
+      term.focus();
+    };
+
+    socket.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "pong") {
+          if (wsRef.current !== socket) return;
+          lastPongAt = Date.now();
+          clearProbe();
+          flushPendingMessages(socket);
+          return;
+        }
+
+        if (msg.type === "output") {
+          const buffer = term.buffer.active;
+          const scrollYBefore = buffer.viewportY;
+          const wasAtTop = scrollYBefore <= 0;
+          const wasAtBottom = scrollYBefore >= buffer.baseY;
+
+          term.write(msg.data);
+
+          requestAnimationFrame(() => {
+            const scrollYAfter = term.buffer.active.viewportY;
+            const isNowAtTop = scrollYAfter <= 0;
+
+            if (isNowAtTop && !wasAtTop && !wasAtBottom && scrollYBefore > 5) {
+              term.scrollToLine(scrollYBefore);
+            }
+          });
+        } else if (msg.type === "exit") {
+          term.write("\r\n\x1b[33m[Session ended]\x1b[0m\r\n");
+        }
+      } catch {
+        term.write(event.data);
+      }
+    };
+
+    socket.onclose = () => {
+      if (wsRef.current === socket) {
+        wsRef.current = null;
+      }
+      clearProbe();
+      callbacks.onSetConnected(false);
+      callbacks.onDisconnected?.();
+
+      if (intentionalCloseRef.current) {
+        callbacks.onConnectionStateChange("disconnected");
+        return;
+      }
+
+      callbacks.onConnectionStateChange("disconnected");
+
+      const currentDelay = reconnectDelayRef.current;
+      reconnectDelayRef.current = Math.min(
+        currentDelay * 2,
+        WS_RECONNECT_MAX_DELAY
+      );
+      reconnectTimeoutRef.current = setTimeout(attemptReconnect, currentDelay);
+    };
+
+    socket.onerror = () => {
+      // Errors are handled by onclose
+    };
+
+    return socket;
+  };
 
   const sendResize = (cols: number, rows: number) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -39,44 +166,46 @@ export function createWebSocketConnection(
     }
   };
 
-  const sendInput = (data: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "input", data }));
+  const sendWithProbeAwareness = (payload: string) => {
+    const currentWs = wsRef.current;
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return;
+
+    if (probeSocket === currentWs) {
+      pendingMessages.push(payload);
+      return;
     }
 
     if (wasBrowserSuspended()) {
-      scheduleReconnectIfNeeded(true);
+      pendingMessages.push(payload);
+      if (!startProbe()) {
+        scheduleHealthCheck(prefersAggressiveReconnect ? "reconnect" : "probe");
+      }
+      return;
     }
+
+    currentWs.send(payload);
+  };
+
+  const sendInput = (data: string) => {
+    sendWithProbeAwareness(JSON.stringify({ type: "input", data }));
   };
 
   const sendCommand = (command: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: "command", data: command }));
-    }
-  };
-
-  // Force reconnect - kills any existing connection and creates fresh one
-  // Note: savedHandlers is populated after handlers are defined below
-  let savedHandlers: {
-    onopen: typeof ws.onopen;
-    onmessage: typeof ws.onmessage;
-    onclose: typeof ws.onclose;
-    onerror: typeof ws.onerror;
+    sendWithProbeAwareness(JSON.stringify({ type: "command", data: command }));
   };
 
   const forceReconnect = () => {
     if (intentionalCloseRef.current) return;
 
-    // Clear any pending reconnect
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
     }
 
-    // Force close existing socket regardless of state (handles hung sockets)
+    clearProbe();
+
     const oldWs = wsRef.current;
     if (oldWs) {
-      // Remove handlers to prevent callbacks
       oldWs.onopen = null;
       oldWs.onmessage = null;
       oldWs.onclose = null;
@@ -92,103 +221,114 @@ export function createWebSocketConnection(
     callbacks.onConnectionStateChange("reconnecting");
     reconnectDelayRef.current = WS_RECONNECT_BASE_DELAY;
 
-    // Create fresh connection with saved handlers
-    const newWs = new WebSocket(
-      `${protocol}//${window.location.host}/ws/terminal`
-    );
-    wsRef.current = newWs;
-    newWs.onopen = savedHandlers.onopen;
-    newWs.onmessage = savedHandlers.onmessage;
-    newWs.onclose = savedHandlers.onclose;
-    newWs.onerror = savedHandlers.onerror;
+    createSocket();
   };
 
-  // Soft reconnect - only if not already connected
   const attemptReconnect = () => {
     if (intentionalCloseRef.current) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
     forceReconnect();
   };
 
-  ws.onopen = () => {
-    callbacks.onSetConnected(true);
-    callbacks.onConnectionStateChange("connected");
-    reconnectDelayRef.current = WS_RECONNECT_BASE_DELAY;
-    callbacks.onConnected?.();
-    sendResize(term.cols, term.rows);
-    term.focus();
-  };
+  const startProbe = () => {
+    if (intentionalCloseRef.current) return false;
+    if (document.visibilityState !== "visible") return false;
 
-  // Fight against Claude Code's forced top-scrolling bug
-  // See: https://github.com/anthropics/claude-code/issues/826
-  ws.onmessage = (event) => {
+    const currentWs = wsRef.current;
+    if (!currentWs || currentWs.readyState !== WebSocket.OPEN) return false;
+    if (probeSocket === currentWs) return true;
+
+    clearProbe();
+    probeSocket = currentWs;
+
     try {
-      const msg = JSON.parse(event.data);
-      if (msg.type === "output") {
-        const buffer = term.buffer.active;
-        const scrollYBefore = buffer.viewportY;
-        const wasAtTop = scrollYBefore <= 0;
-        const wasAtBottom = scrollYBefore >= buffer.baseY;
-
-        term.write(msg.data);
-
-        // After write, check if scroll jumped to top unexpectedly
-        // Give it a moment for the write to complete
-        requestAnimationFrame(() => {
-          const scrollYAfter = term.buffer.active.viewportY;
-          const isNowAtTop = scrollYAfter <= 0;
-
-          // If we jumped to top but weren't at top before, and weren't at bottom
-          // (at bottom means we want to follow output), restore position
-          if (isNowAtTop && !wasAtTop && !wasAtBottom && scrollYBefore > 5) {
-            term.scrollToLine(scrollYBefore);
-          }
-        });
-      } else if (msg.type === "exit") {
-        term.write("\r\n\x1b[33m[Session ended]\x1b[0m\r\n");
-      }
+      currentWs.send(JSON.stringify({ type: "ping" }));
     } catch {
-      term.write(event.data);
+      clearProbe();
+      return false;
     }
+
+    probeTimeout = setTimeout(() => {
+      if (intentionalCloseRef.current) return;
+      if (probeSocket !== currentWs) return;
+      clearProbe();
+
+      if (
+        wsRef.current === currentWs &&
+        currentWs.readyState === WebSocket.OPEN
+      ) {
+        forceReconnect();
+      }
+    }, WS_PROBE_TIMEOUT_MS);
+
+    return true;
   };
 
-  ws.onclose = () => {
-    callbacks.onSetConnected(false);
-    callbacks.onDisconnected?.();
+  const runHealthCheck = (mode: "probe" | "reconnect") => {
+    if (intentionalCloseRef.current) return;
+    if (document.visibilityState !== "visible") return;
 
-    if (intentionalCloseRef.current) {
-      callbacks.onConnectionStateChange("disconnected");
+    if (mode === "reconnect") {
+      forceReconnect();
       return;
     }
 
-    callbacks.onConnectionStateChange("disconnected");
+    const currentWs = wsRef.current;
+    if (
+      !currentWs ||
+      currentWs.readyState === WebSocket.CLOSED ||
+      currentWs.readyState === WebSocket.CLOSING ||
+      currentWs.readyState === WebSocket.CONNECTING
+    ) {
+      forceReconnect();
+      return;
+    }
 
-    const currentDelay = reconnectDelayRef.current;
-    reconnectDelayRef.current = Math.min(
-      currentDelay * 2,
-      WS_RECONNECT_MAX_DELAY
-    );
-    reconnectTimeoutRef.current = setTimeout(attemptReconnect, currentDelay);
+    if (Date.now() - lastPongAt < 1000 && !probeSocket) {
+      return;
+    }
+
+    startProbe();
   };
 
-  ws.onerror = () => {
-    // Errors are handled by onclose
+  const scheduleHealthCheck = (mode: "probe" | "reconnect" = "probe") => {
+    if (resumeTimeout) {
+      clearTimeout(resumeTimeout);
+    }
+
+    resumeTimeout = setTimeout(() => {
+      resumeTimeout = null;
+      runHealthCheck(mode);
+    }, WS_RESUME_DELAY_MS);
   };
 
-  // Save handlers now that they're defined (for reconnection)
-  savedHandlers = {
-    onopen: ws.onopen,
-    onmessage: ws.onmessage,
-    onclose: ws.onclose,
-    onerror: ws.onerror,
+  const sleepCheckInterval = window.setInterval(() => {
+    const now = Date.now();
+    const elapsed = now - lastClockTick;
+    lastClockTick = now;
+
+    if (elapsed > WS_SUSPEND_THRESHOLD_MS) {
+      scheduleHealthCheck(prefersAggressiveReconnect ? "reconnect" : "probe");
+    }
+  }, 10000);
+
+  const heartbeatInterval = window.setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (Date.now() - lastPongAt < WS_HEARTBEAT_INTERVAL_MS / 2) return;
+    startProbe();
+  }, WS_HEARTBEAT_INTERVAL_MS);
+
+  const wasBrowserSuspended = () => {
+    const now = Date.now();
+    const elapsed = now - lastClockTick;
+    lastClockTick = now;
+    return elapsed > WS_SUSPEND_THRESHOLD_MS;
   };
 
-  // Handle terminal input
   term.onData((data) => {
     sendInput(data);
   });
 
-  // Handle Shift+Enter for multi-line input
   term.attachCustomKeyEventHandler((event) => {
     if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
       sendInput("\n");
@@ -197,61 +337,6 @@ export function createWebSocketConnection(
     return true;
   });
 
-  // Track when page was last hidden (for detecting long sleeps)
-  let hiddenAt: number | null =
-    document.visibilityState === "hidden" ? Date.now() : null;
-  let resumeTimeout: ReturnType<typeof setTimeout> | null = null;
-  let lastClockTick = Date.now();
-  const sleepCheckInterval = window.setInterval(() => {
-    const now = Date.now();
-    const elapsed = now - lastClockTick;
-    lastClockTick = now;
-
-    if (elapsed > 30000) {
-      scheduleReconnectIfNeeded(true);
-    }
-  }, 10000);
-
-  const wasBrowserSuspended = () => {
-    const now = Date.now();
-    const elapsed = now - lastClockTick;
-    lastClockTick = now;
-    return elapsed > 30000;
-  };
-
-  const reconnectIfNeeded = (force = false) => {
-    if (intentionalCloseRef.current) return;
-    if (document.visibilityState !== "visible") return;
-
-    if (force) {
-      forceReconnect();
-      return;
-    }
-
-    const currentWs = wsRef.current;
-    const isDisconnected =
-      !currentWs ||
-      currentWs.readyState === WebSocket.CLOSED ||
-      currentWs.readyState === WebSocket.CLOSING;
-    const isStaleConnection = currentWs?.readyState === WebSocket.CONNECTING;
-
-    if (isDisconnected || isStaleConnection) {
-      forceReconnect();
-    }
-  };
-
-  const scheduleReconnectIfNeeded = (force = false) => {
-    if (resumeTimeout) {
-      clearTimeout(resumeTimeout);
-    }
-
-    resumeTimeout = setTimeout(() => {
-      resumeTimeout = null;
-      reconnectIfNeeded(force);
-    }, 250);
-  };
-
-  // Handle visibility change for reconnection
   const handleVisibilityChange = () => {
     if (intentionalCloseRef.current) return;
 
@@ -266,22 +351,31 @@ export function createWebSocketConnection(
     const wasHiddenFor = hiddenAt ? Date.now() - hiddenAt : 0;
     hiddenAt = null;
 
-    // If hidden for more than 5 seconds, force reconnect (iOS Safari kills sockets)
-    // This handles the "hung socket" problem where readyState says OPEN but it's dead
-    if (wasHiddenFor > 5000) {
-      scheduleReconnectIfNeeded(true);
+    if (
+      prefersAggressiveReconnect &&
+      wasHiddenFor > MOBILE_HIDDEN_RECONNECT_MS
+    ) {
+      scheduleHealthCheck("reconnect");
       return;
     }
 
-    // Otherwise only reconnect if actually disconnected
-    scheduleReconnectIfNeeded();
+    scheduleHealthCheck("probe");
   };
-  const handleResume = () => scheduleReconnectIfNeeded(wasBrowserSuspended());
+
+  const handleResume = () => {
+    if (wasBrowserSuspended() && prefersAggressiveReconnect) {
+      scheduleHealthCheck("reconnect");
+      return;
+    }
+    scheduleHealthCheck("probe");
+  };
 
   document.addEventListener("visibilitychange", handleVisibilityChange);
   window.addEventListener("pageshow", handleResume);
   window.addEventListener("focus", handleResume);
   window.addEventListener("online", handleResume);
+
+  const ws = createSocket();
 
   const cleanup = () => {
     document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -292,7 +386,10 @@ export function createWebSocketConnection(
       clearTimeout(resumeTimeout);
       resumeTimeout = null;
     }
+    clearProbe();
+    clearPendingMessages();
     window.clearInterval(sleepCheckInterval);
+    window.clearInterval(heartbeatInterval);
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -315,4 +412,12 @@ export function createWebSocketConnection(
     reconnect: forceReconnect,
     cleanup,
   };
+}
+
+function shouldUseAggressiveReconnect() {
+  const ua = navigator.userAgent || "";
+  const isTouchMac =
+    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
+
+  return /Android|iPhone|iPad|iPod/i.test(ua) || isTouchMac;
 }

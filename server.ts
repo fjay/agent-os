@@ -96,6 +96,11 @@ app.prepare().then(() => {
       try {
         const msg = JSON.parse(message.toString());
         switch (msg.type) {
+          case "ping":
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
+            }
+            break;
           case "input":
             ptyProcess.write(msg.data);
             break;
