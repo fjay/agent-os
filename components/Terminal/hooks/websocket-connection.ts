@@ -7,7 +7,6 @@ const WS_HEARTBEAT_INTERVAL_MS = 20000;
 const WS_PROBE_TIMEOUT_MS = 1500;
 const WS_RESUME_DELAY_MS = 250;
 const WS_SUSPEND_THRESHOLD_MS = 30000;
-const MOBILE_HIDDEN_RECONNECT_MS = 5000;
 
 export interface WebSocketCallbacks {
   onConnected?: () => void;
@@ -37,11 +36,8 @@ export function createWebSocketConnection(
 ): WebSocketManager {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
-  const prefersAggressiveReconnect = shouldUseAggressiveReconnect();
   const pendingMessages: string[] = [];
 
-  let hiddenAt: number | null =
-    document.visibilityState === "hidden" ? Date.now() : null;
   let resumeTimeout: ReturnType<typeof setTimeout> | null = null;
   let probeTimeout: ReturnType<typeof setTimeout> | null = null;
   let probeSocket: WebSocket | null = null;
@@ -178,7 +174,7 @@ export function createWebSocketConnection(
     if (wasBrowserSuspended()) {
       pendingMessages.push(payload);
       if (!startProbe()) {
-        scheduleHealthCheck(prefersAggressiveReconnect ? "reconnect" : "probe");
+        scheduleHealthCheck("probe");
       }
       return;
     }
@@ -308,7 +304,7 @@ export function createWebSocketConnection(
     lastClockTick = now;
 
     if (elapsed > WS_SUSPEND_THRESHOLD_MS) {
-      scheduleHealthCheck(prefersAggressiveReconnect ? "reconnect" : "probe");
+      scheduleHealthCheck("probe");
     }
   }, 10000);
 
@@ -341,32 +337,16 @@ export function createWebSocketConnection(
     if (intentionalCloseRef.current) return;
 
     if (document.visibilityState === "hidden") {
-      hiddenAt = Date.now();
       return;
     }
 
-    // Page became visible
     if (document.visibilityState !== "visible") return;
-
-    const wasHiddenFor = hiddenAt ? Date.now() - hiddenAt : 0;
-    hiddenAt = null;
-
-    if (
-      prefersAggressiveReconnect &&
-      wasHiddenFor > MOBILE_HIDDEN_RECONNECT_MS
-    ) {
-      scheduleHealthCheck("reconnect");
-      return;
-    }
 
     scheduleHealthCheck("probe");
   };
 
   const handleResume = () => {
-    if (wasBrowserSuspended() && prefersAggressiveReconnect) {
-      scheduleHealthCheck("reconnect");
-      return;
-    }
+    wasBrowserSuspended();
     scheduleHealthCheck("probe");
   };
 
@@ -412,12 +392,4 @@ export function createWebSocketConnection(
     reconnect: forceReconnect,
     cleanup,
   };
-}
-
-function shouldUseAggressiveReconnect() {
-  const ua = navigator.userAgent || "";
-  const isTouchMac =
-    navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
-
-  return /Android|iPhone|iPad|iPod/i.test(ua) || isTouchMac;
 }
