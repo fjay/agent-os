@@ -272,7 +272,7 @@ export const Pane = memo(function Pane({
     [paneId, onRegisterTerminal]
   );
 
-  // After hydration, restore tmux sessions for tabs that connected before tab data was available
+  // Restore tabs whose terminal connected before their session metadata arrived.
   useEffect(() => {
     if (!hydrated) return;
 
@@ -281,16 +281,15 @@ export const Pane = memo(function Pane({
         if (!tab.attachedTmux || !tab.sessionId) continue;
         if (restoredTabsRef.current.has(tab.id)) continue;
         const handle = terminalRefs.current.get(tab.id);
-        if (handle) {
-          restoredTabsRef.current.add(tab.id);
-          onRestoreTabRef.current?.(paneId, tab);
-        }
+        if (!handle || handle.getConnectionState() !== "connected") continue;
+
+        restoredTabsRef.current.add(tab.id);
+        onRestoreTabRef.current?.(paneId, tab);
       }
-    }, 200);
+    }, 50);
 
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hydrated]);
+  }, [hydrated, paneData.tabs, paneId]);
 
   // Track current tab ID for cleanup
   const activeTabIdRef = useRef<string | null>(null);

@@ -43,6 +43,12 @@ interface PaneContextValue {
   switchTab: (paneId: string, tabId: string) => void;
   // Session management (operates on active tab)
   attachSession: (paneId: string, sessionId: string, tmuxName: string) => void;
+  attachSessionToTab: (
+    paneId: string,
+    tabId: string,
+    sessionId: string,
+    tmuxName: string
+  ) => void;
   detachSession: (paneId: string) => void;
   getPaneData: (paneId: string) => PaneData;
   getActiveTab: (paneId: string) => TabData | null;
@@ -207,6 +213,28 @@ export function PaneProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const attachSessionToTab = useCallback(
+    (paneId: string, tabId: string, sessionId: string, tmuxName: string) => {
+      setState((prev) => {
+        const pane = prev.panes[paneId];
+        if (!pane) return prev;
+
+        const newTabs = pane.tabs.map((tab) =>
+          tab.id === tabId ? { ...tab, sessionId, attachedTmux: tmuxName } : tab
+        );
+
+        return {
+          ...prev,
+          panes: {
+            ...prev.panes,
+            [paneId]: { ...pane, tabs: newTabs },
+          },
+        };
+      });
+    },
+    []
+  );
+
   // Detach session from active tab
   const detachSession = useCallback((paneId: string) => {
     setState((prev) => {
@@ -273,6 +301,7 @@ export function PaneProvider({ children }: { children: ReactNode }) {
         closeTab,
         switchTab,
         attachSession,
+        attachSessionToTab,
         detachSession,
         getPaneData,
         getActiveTab,

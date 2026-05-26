@@ -58,7 +58,7 @@ function HomeContent() {
     focusedPaneId,
     focusPane,
     switchTab,
-    attachSession,
+    attachSessionToTab,
     getActiveTab,
     addTab,
     findOpenTabBySessionId,
@@ -184,20 +184,10 @@ function HomeContent() {
     []
   );
 
-  const runSessionInTerminal = useCallback(
-    (
-      terminal: TerminalHandle,
-      paneId: string,
-      session: Session,
-      sessionInfo: { sessionName: string; cwd: string; command: string }
-    ) => {
-      const { sessionName } = sessionInfo;
-      terminal.sendCommand(buildTmuxAttachOrCreateCommand(sessionInfo));
-      attachSession(paneId, session.id, sessionName);
-      terminal.focus();
-    },
-    [attachSession, buildTmuxAttachOrCreateCommand]
-  );
+  const getSessionTmuxName = useCallback((session: Session): string => {
+    const provider = getProvider(session.agent_type || "claude");
+    return session.tmux_name || `${provider.id}-${session.id}`;
+  }, []);
 
   const activateOpenSessionTab = useCallback(
     (paneId: string, tabId: string) => {
@@ -226,39 +216,23 @@ function HomeContent() {
 
       const paneId = focusedPaneId;
       const newTabId = addTab(paneId);
+      attachSessionToTab(
+        paneId,
+        newTabId,
+        session.id,
+        getSessionTmuxName(session)
+      );
       focusPane(paneId);
       switchTab(paneId, newTabId);
-
-      let attempts = 0;
-      const maxAttempts = 20;
-
-      const waitForNewTerminal = () => {
-        attempts++;
-        const terminal = terminalRefs.current.get(`${paneId}:${newTabId}`);
-        if (terminal) {
-          buildSessionCommand(session).then((sessionInfo) => {
-            runSessionInTerminal(terminal, paneId, session, sessionInfo);
-          });
-          return;
-        }
-
-        if (attempts < maxAttempts) {
-          setTimeout(waitForNewTerminal, 50);
-        } else {
-          debugLog(`Failed to find new terminal after ${maxAttempts} attempts`);
-        }
-      };
-
-      setTimeout(waitForNewTerminal, 50);
     },
     [
       activateOpenSessionTab,
       addTab,
-      buildSessionCommand,
+      attachSessionToTab,
       focusedPaneId,
       findOpenTabBySessionId,
       focusPane,
-      runSessionInTerminal,
+      getSessionTmuxName,
       switchTab,
     ]
   );
@@ -304,39 +278,21 @@ function HomeContent() {
     (session: Session) => {
       const paneId = focusedPaneId;
       const newTabId = addTab(paneId);
+      attachSessionToTab(
+        paneId,
+        newTabId,
+        session.id,
+        getSessionTmuxName(session)
+      );
       focusPane(paneId);
       switchTab(paneId, newTabId);
-
-      let attempts = 0;
-      const maxAttempts = 20;
-
-      const waitForNewTerminal = () => {
-        attempts++;
-
-        const key = `${paneId}:${newTabId}`;
-        const terminal = terminalRefs.current.get(key);
-        if (terminal) {
-          buildSessionCommand(session).then((sessionInfo) => {
-            runSessionInTerminal(terminal, paneId, session, sessionInfo);
-          });
-          return;
-        }
-
-        if (attempts < maxAttempts) {
-          setTimeout(waitForNewTerminal, 50);
-        } else {
-          debugLog(`Failed to find new terminal after ${maxAttempts} attempts`);
-        }
-      };
-
-      setTimeout(waitForNewTerminal, 50);
     },
     [
       addTab,
-      buildSessionCommand,
+      attachSessionToTab,
       focusPane,
       focusedPaneId,
-      runSessionInTerminal,
+      getSessionTmuxName,
       switchTab,
     ]
   );
