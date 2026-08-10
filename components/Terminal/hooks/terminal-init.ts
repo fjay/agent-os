@@ -4,7 +4,6 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
-import { CanvasAddon } from "@xterm/addon-canvas";
 import { getTerminalThemeForApp } from "../constants";
 
 export interface TerminalInstance {
@@ -48,7 +47,6 @@ export function createTerminal(
   term.loadAddon(new WebLinksAddon());
   term.loadAddon(searchAddon);
   term.open(container);
-  term.loadAddon(new CanvasAddon());
   fitAddon.fit();
 
   // Helper to copy text to clipboard with fallback
