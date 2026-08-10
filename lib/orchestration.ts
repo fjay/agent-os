@@ -279,7 +279,7 @@ export async function getWorkers(
     // Get live status from tmux
     let liveStatus: string;
     try {
-      liveStatus = await statusDetector.getStatus(tmuxSessionName);
+      liveStatus = await statusDetector.getStatus(tmuxSessionName, provider.id);
     } catch {
       liveStatus = "dead";
     }
@@ -356,6 +356,7 @@ export async function sendToWorker(
     await execAsync(
       `tmux send-keys -t "${tmuxSessionName}" "${escapedMessage}" Enter`
     );
+    await statusDetector.recordInput(tmuxSessionName, provider.id);
     return true;
   } catch {
     return false;

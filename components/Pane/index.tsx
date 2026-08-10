@@ -35,6 +35,8 @@ import { GitDrawer } from "@/components/GitDrawer";
 import { ShellDrawer } from "@/components/ShellDrawer";
 import { useSnapshot } from "valtio";
 import { fileOpenStore, fileOpenActions } from "@/stores/fileOpen";
+import { useQueryClient } from "@tanstack/react-query";
+import { statusKeys } from "@/data/sessions/keys";
 
 // Dynamic imports for client-only components with loading states
 const Terminal = dynamic(
@@ -80,6 +82,7 @@ export const Pane = memo(function Pane({
   onReloadPage,
 }: PaneProps) {
   const { isMobile } = useViewport();
+  const queryClient = useQueryClient();
   const {
     hydrated,
     state: paneState,
@@ -114,6 +117,7 @@ export const Pane = memo(function Pane({
   const onRestoreTabRef = useRef(onRestoreTab);
   onRestoreTabRef.current = onRestoreTab;
   const restoredTabsRef = useRef<Set<string>>(new Set());
+  const inputActivityAtRef = useRef<Map<string, number>>(new Map());
   const paneData = getPaneData(paneId);
   const activeTab = getActiveTab(paneId);
 
@@ -204,6 +208,32 @@ export const Pane = memo(function Pane({
     }
     detachSession(paneId);
   }, [detachSession, paneId, terminalRef]);
+
+  const recordUserInput = useCallback(
+    (sessionId: string | null) => {
+      if (!sessionId) return;
+
+      const now = Date.now();
+      const lastRecordedAt = inputActivityAtRef.current.get(sessionId) || 0;
+      if (now - lastRecordedAt < 1000) return;
+      inputActivityAtRef.current.set(sessionId, now);
+
+      fetch(`/api/sessions/${sessionId}/activity`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "input" }),
+      })
+        .then((res) => {
+          if (res.ok) {
+            queryClient.invalidateQueries({ queryKey: statusKeys.all });
+          }
+        })
+        .catch(() => {
+          // Status will recover on the next poll if activity recording fails.
+        });
+    },
+    [queryClient]
+  );
 
   const handleTabSwitch = useCallback(
     (tabId: string) => {
@@ -511,6 +541,7 @@ export const Pane = memo(function Pane({
                       : undefined
                   }
                   tmuxSessionName={tabTmuxName || undefined}
+                  onUserInput={() => recordUserInput(tab.sessionId)}
                   onReloadPage={onReloadPage}
                 />
               </div>
@@ -617,6 +648,7 @@ export const Pane = memo(function Pane({
                           tmuxSessionName={tabTmuxName || undefined}
                           selectMode={selectMode}
                           onSelectModeChange={setSelectMode}
+                          onUserInput={() => recordUserInput(tab.sessionId)}
                           onReloadPage={onReloadPage}
                         />
                       </div>

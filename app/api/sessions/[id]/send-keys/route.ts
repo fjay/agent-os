@@ -3,6 +3,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { getDb, queries, type Session } from "@/lib/db";
 import { appendFileSync } from "fs";
+import { getProvider } from "@/lib/providers";
+import { statusDetector } from "@/lib/status-detector";
 
 const execAsync = promisify(exec);
 
@@ -99,6 +101,9 @@ export async function POST(
           `Enter stdout: "${enterResult.stdout}", stderr: "${enterResult.stderr}"`
         );
       }
+
+      const provider = getProvider(session.agent_type || "claude");
+      await statusDetector.recordInput(tmuxSessionName, provider.id);
 
       log(`=== SUCCESS ===`);
       return NextResponse.json({ success: true });

@@ -11,6 +11,7 @@ const WS_SUSPEND_THRESHOLD_MS = 30000;
 export interface WebSocketCallbacks {
   onConnected?: () => void;
   onDisconnected?: () => void;
+  onUserInput?: () => void;
   onConnectionStateChange: (
     state: "connecting" | "connected" | "disconnected" | "reconnecting"
   ) => void;
@@ -322,11 +323,13 @@ export function createWebSocketConnection(
   };
 
   term.onData((data) => {
+    if (data) callbacks.onUserInput?.();
     sendInput(data);
   });
 
   term.attachCustomKeyEventHandler((event) => {
     if (event.type === "keydown" && event.key === "Enter" && event.shiftKey) {
+      callbacks.onUserInput?.();
       sendInput("\n");
       return false;
     }

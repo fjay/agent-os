@@ -19,6 +19,7 @@ export interface UseTerminalConnectionProps {
   isMobile?: boolean;
   theme?: string;
   selectMode?: boolean;
+  onUserInput?: () => void;
 }
 
 export interface UseTerminalConnectionReturn {

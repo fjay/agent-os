@@ -30,6 +30,7 @@ export function useTerminalConnection({
   isMobile = false,
   theme = "dark",
   selectMode = false,
+  onUserInput,
 }: UseTerminalConnectionProps): UseTerminalConnectionReturn {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
@@ -49,8 +50,18 @@ export function useTerminalConnection({
   const intentionalCloseRef = useRef<boolean>(false);
 
   // Store callbacks and state in refs
-  const callbacksRef = useRef({ onConnected, onDisconnected, onBeforeUnmount });
-  callbacksRef.current = { onConnected, onDisconnected, onBeforeUnmount };
+  const callbacksRef = useRef({
+    onConnected,
+    onDisconnected,
+    onBeforeUnmount,
+    onUserInput,
+  });
+  callbacksRef.current = {
+    onConnected,
+    onDisconnected,
+    onBeforeUnmount,
+    onUserInput,
+  };
   const initialScrollStateRef = useRef(initialScrollState);
   const selectModeRef = useRef(selectMode);
   selectModeRef.current = selectMode;
@@ -180,6 +191,7 @@ export function useTerminalConnection({
             }
           },
           onDisconnected: () => callbacksRef.current.onDisconnected?.(),
+          onUserInput: () => callbacksRef.current.onUserInput?.(),
           onConnectionStateChange: setConnectionState,
           onSetConnected: setConnected,
         },

@@ -172,13 +172,13 @@ export async function GET() {
 
     // Process all sessions in parallel for speed
     const sessionPromises = managedSessions.map(async (sessionName) => {
+      const agentType = getAgentTypeFromSessionName(sessionName);
       const [status, claudeSessionId, lastLine] = await Promise.all([
-        statusDetector.getStatus(sessionName),
+        statusDetector.getStatus(sessionName, agentType),
         getClaudeSessionId(sessionName),
         getLastLine(sessionName),
       ]);
       const id = getSessionIdFromName(sessionName);
-      const agentType = getAgentTypeFromSessionName(sessionName);
 
       return { sessionName, id, status, claudeSessionId, lastLine, agentType };
     });

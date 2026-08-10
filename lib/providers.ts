@@ -54,6 +54,8 @@ export interface BuildFlagsOptions {
 
 // Common spinner characters used across CLIs
 const SPINNER_CHARS = /⠋|⠙|⠹|⠸|⠼|⠴|⠦|⠧|⠇|⠏/;
+const PRESS_ENTER_FOR_INPUT =
+  /Press Enter (?:to )?(?:continue|confirm|proceed|accept|retry)/i;
 
 /**
  * Claude Code Provider
@@ -106,8 +108,8 @@ export const claudeProvider: AgentProvider = {
     /Allow\?/i,
     /Approve\?/i,
     /Continue\?/i,
-    /Press Enter/i,
-    /waiting for/i,
+    PRESS_ENTER_FOR_INPUT,
+    /waiting for input/i,
     /\(yes\/no\)/i,
     /Do you want to/i,
     /Esc to cancel/i,
@@ -179,9 +181,9 @@ export const codexProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -230,8 +232,8 @@ export const opencodeProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -284,9 +286,9 @@ export const geminiProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
     /Do you want to/i,
   ],
@@ -338,8 +340,7 @@ export const aiderProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    />\s*$/m,
-    /Press Enter/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -390,9 +391,9 @@ export const cursorProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -446,9 +447,9 @@ export const ampProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -492,9 +493,9 @@ export const piProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 
@@ -537,9 +538,9 @@ export const ompProvider: AgentProvider = {
   waitingPatterns: [
     /\[Y\/n\]/i,
     /\[y\/N\]/i,
-    /approve/i,
-    /confirm/i,
-    /Press Enter/i,
+    /Approve\?/i,
+    /Confirm\?/i,
+    PRESS_ENTER_FOR_INPUT,
     /\(yes\/no\)/i,
   ],
 

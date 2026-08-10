@@ -54,6 +54,8 @@ interface TerminalProps {
   selectMode?: boolean;
   /** Callback when select mode changes */
   onSelectModeChange?: (enabled: boolean) => void;
+  /** Called when the user types directly into the terminal */
+  onUserInput?: () => void;
 }
 
 export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
@@ -68,6 +70,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       tmuxSessionName,
       selectMode: externalSelectMode,
       onSelectModeChange,
+      onUserInput,
     },
     ref
   ) {
@@ -135,7 +138,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       isMobile,
       theme: terminalTheme,
       selectMode: selectModeActive,
+      onUserInput,
     });
+
+    const sendUserInput = useCallback(
+      (data: string) => {
+        if (data) onUserInput?.();
+        sendInput(data);
+      },
+      [onUserInput, sendInput]
+    );
 
     const {
       searchVisible,
@@ -150,11 +162,11 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
     // Handle image selection - paste file path into terminal
     const handleImageSelect = useCallback(
       (filePath: string) => {
-        sendInput(filePath);
+        sendUserInput(filePath);
         setShowFilePicker(false);
         focus();
       },
-      [sendInput, focus]
+      [sendUserInput, focus]
     );
 
     // Handle file drop - upload and insert path into terminal
@@ -164,7 +176,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         try {
           const path = await uploadFileToTemp(file);
           if (path) {
-            sendInput(path);
+            sendUserInput(path);
             focus();
           }
         } catch (err) {
@@ -173,7 +185,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           setIsUploading(false);
         }
       },
-      [sendInput, focus]
+      [sendUserInput, focus]
     );
 
     // Drag and drop for file uploads
@@ -392,7 +404,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         {/* Mobile: Toolbar with special keys (native keyboard handles text) */}
         {isMobile && (
           <TerminalToolbar
-            onKeyPress={sendInput}
+            onKeyPress={sendUserInput}
             onFilePicker={() => setShowFilePicker(true)}
             selectMode={selectModeActive}
             onSelectModeChange={handleSelectModeChange}

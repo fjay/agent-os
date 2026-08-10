@@ -181,10 +181,7 @@ export function useNotifications(options: UseNotificationsOptions = {}) {
             notifiedSessions.current.add(notifyKey);
             notify("error", session.id, session.name);
           }
-        } else if (
-          currentStatus === "idle" &&
-          (prevStatus === "running" || prevStatus === "waiting")
-        ) {
+        } else if (currentStatus === "idle" && prevStatus === "running") {
           const completedKey = `${session.id}-completed`;
           if (!notifiedSessions.current.has(completedKey)) {
             notifiedSessions.current.add(completedKey);

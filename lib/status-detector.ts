@@ -3,8 +3,8 @@
  *
  * States:
  * - "running" (GREEN): Sustained activity within cooldown period
- * - "waiting" (YELLOW): Cooldown expired, NOT acknowledged (needs attention)
- * - "idle" (GRAY): Cooldown expired, acknowledged (user saw it)
+ * - "waiting" (YELLOW): Explicit prompt is asking for user input
+ * - "idle" (GRAY): Not running and not asking for input
  * - "dead": Session doesn't exist
  *
  * Detection Strategy:
@@ -16,6 +16,7 @@
 
 import { exec } from "child_process";
 import { promisify } from "util";
+import { getProvider, type AgentType } from "./providers";
 
 const execAsync = promisify(exec);
 
@@ -25,7 +26,6 @@ const CONFIG = {
   SPIKE_WINDOW_MS: 1000, // Window to detect sustained activity
   SUSTAINED_THRESHOLD: 2, // Changes needed to confirm activity
   CACHE_VALIDITY_MS: 2000, // How long tmux cache is valid
-  RECENT_ACTIVITY_MS: 120000, // Window for "recent" activity (2 min, tmux updates slowly)
 } as const;
 
 // Detection patterns
@@ -130,13 +130,13 @@ const WHIMSICAL_WORDS = [
   "wrangling",
 ];
 
-const WAITING_PATTERNS = [
+const DEFAULT_WAITING_PATTERNS = [
   /\[Y\/n\]/i,
   /\[y\/N\]/i,
   /Allow\?/i,
   /Approve\?/i,
   /Continue\?/i,
-  /Press Enter to/i,
+  /Press Enter (?:to )?(?:continue|confirm|proceed|accept|retry)/i,
   /waiting for input/i,
   /\(yes\/no\)/i,
   /Do you want to/i,
@@ -151,10 +151,12 @@ export type SessionStatus = "running" | "waiting" | "idle" | "dead";
 
 interface StateTracker {
   lastChangeTime: number;
-  acknowledged: boolean;
   lastActivityTimestamp: number;
   spikeWindowStart: number | null;
   spikeChangeCount: number;
+  lastUserInputAt: number;
+  lastWaitingFingerprint: string | null;
+  suppressedWaitingFingerprint: string | null;
 }
 
 interface SessionCache {
@@ -185,9 +187,42 @@ function checkBusyIndicators(content: string): boolean {
   return false;
 }
 
-function checkWaitingPatterns(content: string): boolean {
-  const recentLines = content.split("\n").slice(-5).join("\n");
-  return WAITING_PATTERNS.some((p) => p.test(recentLines));
+function normalizeTerminalLine(line: string): string {
+  return line
+    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getRecentContent(content: string): string {
+  return content
+    .split("\n")
+    .slice(-8)
+    .map(normalizeTerminalLine)
+    .filter(Boolean)
+    .join("\n");
+}
+
+function getWaitingPatterns(agentType?: AgentType): RegExp[] {
+  if (!agentType) return DEFAULT_WAITING_PATTERNS;
+
+  const provider = getProvider(agentType);
+  if (provider.id === "shell") return [];
+
+  return [...DEFAULT_WAITING_PATTERNS, ...provider.waitingPatterns];
+}
+
+function getWaitingFingerprint(
+  content: string,
+  agentType?: AgentType
+): string | null {
+  const recentContent = getRecentContent(content);
+  if (!recentContent) return null;
+
+  const patterns = getWaitingPatterns(agentType);
+  if (!patterns.some((p) => p.test(recentContent))) return null;
+
+  return recentContent;
 }
 
 class SessionStatusDetector {
@@ -240,10 +275,12 @@ class SessionStatusDetector {
     if (!tracker) {
       tracker = {
         lastChangeTime: Date.now() - CONFIG.ACTIVITY_COOLDOWN_MS,
-        acknowledged: true,
         lastActivityTimestamp: timestamp,
         spikeWindowStart: null,
         spikeChangeCount: 0,
+        lastUserInputAt: 0,
+        lastWaitingFingerprint: null,
+        suppressedWaitingFingerprint: null,
       };
       this.trackers.set(name, tracker);
     }
@@ -275,7 +312,6 @@ class SessionStatusDetector {
         if (tracker.spikeChangeCount >= CONFIG.SUSTAINED_THRESHOLD) {
           // Sustained activity confirmed
           tracker.lastChangeTime = now;
-          tracker.acknowledged = false;
           tracker.spikeWindowStart = null;
           tracker.spikeChangeCount = 0;
           return "running";
@@ -306,11 +342,17 @@ class SessionStatusDetector {
     return Date.now() - tracker.lastChangeTime < CONFIG.ACTIVITY_COOLDOWN_MS;
   }
 
-  private getIdleOrWaiting(tracker: StateTracker): SessionStatus {
-    return tracker.acknowledged ? "idle" : "waiting";
+  private isSuppressedWaiting(
+    tracker: StateTracker,
+    fingerprint: string
+  ): boolean {
+    return tracker.suppressedWaitingFingerprint === fingerprint;
   }
 
-  async getStatus(sessionName: string): Promise<SessionStatus> {
+  async getStatus(
+    sessionName: string,
+    agentType?: AgentType
+  ): Promise<SessionStatus> {
     await this.refreshCache();
 
     // Dead check
@@ -327,12 +369,20 @@ class SessionStatusDetector {
     // No activity timestamp check needed since we only look at recent terminal lines
     if (checkBusyIndicators(content)) {
       tracker.lastChangeTime = Date.now();
-      tracker.acknowledged = false;
       return "running";
     }
 
     // 2. Waiting patterns (only if not actively running)
-    if (checkWaitingPatterns(content)) return "waiting";
+    const waitingFingerprint = getWaitingFingerprint(content, agentType);
+    if (waitingFingerprint) {
+      tracker.lastWaitingFingerprint = waitingFingerprint;
+      if (!this.isSuppressedWaiting(tracker, waitingFingerprint)) {
+        return "waiting";
+      }
+    } else {
+      tracker.lastWaitingFingerprint = null;
+      tracker.suppressedWaitingFingerprint = null;
+    }
 
     // 3. Spike detection
     const spikeResult = this.processSpikeDetection(tracker, timestamp);
@@ -340,27 +390,46 @@ class SessionStatusDetector {
 
     // 4. During spike window, maintain stable status
     if (this.isInSpikeWindow(tracker)) {
-      return this.isInCooldown(tracker)
-        ? "running"
-        : this.getIdleOrWaiting(tracker);
+      return this.isInCooldown(tracker) ? "running" : "idle";
     }
 
     // 5. Cooldown check
     if (this.isInCooldown(tracker)) return "running";
 
     // 6. Cooldown expired
-    return this.getIdleOrWaiting(tracker);
+    return "idle";
+  }
+
+  async recordInput(sessionName: string, agentType?: AgentType): Promise<void> {
+    await this.refreshCache();
+    const timestamp = this.getTimestamp(sessionName);
+    const tracker = this.getTracker(sessionName, timestamp);
+    const content = await this.capturePane(sessionName);
+    const waitingFingerprint = getWaitingFingerprint(content, agentType);
+
+    tracker.lastUserInputAt = Date.now();
+    tracker.suppressedWaitingFingerprint =
+      waitingFingerprint || tracker.lastWaitingFingerprint;
   }
 
   acknowledge(sessionName: string): void {
     const tracker = this.trackers.get(sessionName);
-    if (tracker) tracker.acknowledged = true;
+    if (tracker) {
+      tracker.lastUserInputAt = Date.now();
+      tracker.suppressedWaitingFingerprint = tracker.lastWaitingFingerprint;
+    }
   }
 
-  async getAllStatuses(names: string[]): Promise<Map<string, SessionStatus>> {
+  async getAllStatuses(
+    names: string[],
+    agentType?: AgentType
+  ): Promise<Map<string, SessionStatus>> {
     await this.refreshCache();
     const results = await Promise.all(
-      names.map(async (name) => ({ name, status: await this.getStatus(name) }))
+      names.map(async (name) => ({
+        name,
+        status: await this.getStatus(name, agentType),
+      }))
     );
     return new Map(results.map((r) => [r.name, r.status]));
   }
@@ -373,3 +442,7 @@ class SessionStatusDetector {
 }
 
 export const statusDetector = new SessionStatusDetector();
+
+export const __statusDetectorTestUtils = {
+  getWaitingFingerprint,
+};
