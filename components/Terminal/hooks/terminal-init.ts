@@ -4,6 +4,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { getTerminalThemeForApp } from "../constants";
 
 export interface TerminalInstance {
@@ -47,6 +48,18 @@ export function createTerminal(
   term.loadAddon(new WebLinksAddon());
   term.loadAddon(searchAddon);
   term.open(container);
+
+  // 优先使用 WebGL 硬件加速渲染器：性能优于 Canvas/DOM，且不会出现 Canvas 渲染器
+  // 在原地刷新内容变短时的像素残影（官方已废弃 Canvas 渲染器，WebGL 为推荐替代）。
+  // 若当前环境不支持 WebGL（无 GPU 等），静默回退到默认 DOM 渲染器。
+  try {
+    const webglAddon = new WebglAddon();
+    // WebGL context 丢失（驱动崩溃/长时间后台）时释放 addon，由 xterm 回退到 DOM 渲染
+    webglAddon.onContextLoss(() => webglAddon.dispose());
+    term.loadAddon(webglAddon);
+  } catch {
+    // WebGL 不可用，保持默认 DOM 渲染器
+  }
   fitAddon.fit();
 
   // Helper to copy text to clipboard with fallback
