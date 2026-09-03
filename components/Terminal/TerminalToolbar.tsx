@@ -18,6 +18,7 @@ import {
   KeyboardOff,
   ChevronDown,
   Maximize2,
+  CornerDownLeft,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -657,7 +658,7 @@ export function TerminalToolbar({
     { label: "→", key: SPECIAL_KEYS.RIGHT },
     { label: "↑", key: SPECIAL_KEYS.UP },
     { label: "↓", key: SPECIAL_KEYS.DOWN },
-    { label: "Esc", key: SPECIAL_KEYS.ESC },
+    { label: "↵", key: "\r" },
     { label: "^C", key: SPECIAL_KEYS.CTRL_C, highlight: true },
     { label: "Tab", key: SPECIAL_KEYS.TAB },
   ];
@@ -771,12 +772,12 @@ export function TerminalToolbar({
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.stopPropagation();
-            onKeyPress(shiftActive ? "\n" : "\r");
-            setShiftActive(false);
+            onKeyPress(SPECIAL_KEYS.ESC);
+            if (shiftActive) setShiftActive(false);
           }}
           className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
         >
-          ↵
+          Esc
         </button>
 
         {/* Special keys */}
@@ -791,18 +792,32 @@ export function TerminalToolbar({
               if (btn.label === "Tab" && shiftActive) {
                 key = "\x1b[Z";
               }
+              if (btn.label === "↵" && shiftActive) {
+                key = "\n";
+              }
               onKeyPress(key);
               if (shiftActive) setShiftActive(false);
             }}
             className={cn(
-              "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+              "flex-shrink-0 rounded-md",
               "active:bg-primary active:text-primary-foreground",
-              btn.highlight
-                ? "bg-red-500/20 text-red-500"
-                : "bg-secondary text-secondary-foreground"
+              btn.label === "↵"
+                ? "bg-secondary text-secondary-foreground flex h-8 w-8 items-center justify-center"
+                : cn(
+                    "px-2.5 py-1.5 text-xs font-medium",
+                    btn.highlight
+                      ? "bg-red-500/20 text-red-500"
+                      : "bg-secondary text-secondary-foreground"
+                  )
             )}
+            aria-label={btn.label === "↵" ? "Enter" : undefined}
+            title={btn.label === "↵" ? "Enter" : undefined}
           >
-            {btn.label}
+            {btn.label === "↵" ? (
+              <CornerDownLeft className="h-4 w-4" />
+            ) : (
+              btn.label
+            )}
           </button>
         ))}
 
