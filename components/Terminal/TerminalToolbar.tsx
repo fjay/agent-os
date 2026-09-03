@@ -574,6 +574,7 @@ export function TerminalToolbar({
   const [showSnippetsModal, setShowSnippetsModal] = useState(false);
   const [showComboModal, setShowComboModal] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
+  const [altActive, setAltActive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
   // Send text as one xterm paste event instead of one WebSocket message per character.
@@ -660,7 +661,6 @@ export function TerminalToolbar({
     { label: "↓", key: SPECIAL_KEYS.DOWN },
     { label: "↵", key: "\r" },
     { label: "^C", key: SPECIAL_KEYS.CTRL_C, highlight: true },
-    { label: "Tab", key: SPECIAL_KEYS.TAB },
   ];
 
   return (
@@ -772,8 +772,11 @@ export function TerminalToolbar({
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.stopPropagation();
-            onKeyPress(SPECIAL_KEYS.ESC);
+            let key = SPECIAL_KEYS.ESC;
+            if (altActive) key = "\x1b" + key;
+            onKeyPress(key);
             if (shiftActive) setShiftActive(false);
+            if (altActive) setAltActive(false);
           }}
           className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
         >
@@ -789,14 +792,13 @@ export function TerminalToolbar({
             onClick={(e) => {
               e.stopPropagation();
               let key: string = btn.key;
-              if (btn.label === "Tab" && shiftActive) {
-                key = "\x1b[Z";
-              }
               if (btn.label === "↵" && shiftActive) {
                 key = "\n";
               }
+              if (altActive) key = "\x1b" + key;
               onKeyPress(key);
               if (shiftActive) setShiftActive(false);
+              if (altActive) setAltActive(false);
             }}
             className={cn(
               "flex-shrink-0 rounded-md",
@@ -820,6 +822,44 @@ export function TerminalToolbar({
             )}
           </button>
         ))}
+
+        {/* Alt toggle - ESC-prefixes the next special key */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setAltActive(!altActive);
+          }}
+          className={cn(
+            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+            altActive
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
+          )}
+          aria-pressed={altActive}
+          title="Alt"
+        >
+          Alt
+        </button>
+
+        {/* Tab key */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            let key: string = SPECIAL_KEYS.TAB;
+            if (shiftActive) key = "\x1b[Z";
+            if (altActive) key = "\x1b" + key;
+            onKeyPress(key);
+            if (shiftActive) setShiftActive(false);
+            if (altActive) setAltActive(false);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+        >
+          Tab
+        </button>
 
         {/* Shift toggle */}
         <button
@@ -845,8 +885,11 @@ export function TerminalToolbar({
           onMouseDown={(e) => e.preventDefault()}
           onClick={(e) => {
             e.stopPropagation();
-            onKeyPress(SPECIAL_KEYS.CTRL_D);
+            let key = SPECIAL_KEYS.CTRL_D;
+            if (altActive) key = "\x1b" + key;
+            onKeyPress(key);
             if (shiftActive) setShiftActive(false);
+            if (altActive) setAltActive(false);
           }}
           className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
         >
