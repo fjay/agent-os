@@ -164,6 +164,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       [sendUserInput, xtermRef]
     );
 
+    // Composer submit: one bulk paste, then Enter to run the content.
+    const submitUserInput = useCallback(
+      (data: string) => {
+        if (!data) return;
+        pasteUserInput(data);
+        sendUserInput("\r");
+      },
+      [pasteUserInput, sendUserInput]
+    );
+
     const {
       searchVisible,
       searchQuery,
@@ -421,6 +431,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
           <TerminalToolbar
             onKeyPress={sendUserInput}
             onPasteText={pasteUserInput}
+            onSubmitText={submitUserInput}
             keyboardOpen={isMobileKeyboardOpen}
             onKeyboardToggle={
               isMobileKeyboardOpen ? closeMobileKeyboard : openMobileKeyboard

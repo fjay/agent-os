@@ -16,7 +16,8 @@ import {
   Zap,
   Keyboard,
   KeyboardOff,
-  MessageSquareText,
+  ChevronDown,
+  Maximize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -38,6 +39,7 @@ const SPECIAL_KEYS = {
 interface TerminalToolbarProps {
   onKeyPress: (key: string) => void;
   onPasteText: (text: string) => void;
+  onSubmitText: (text: string) => void;
   keyboardOpen: boolean;
   onKeyboardToggle: () => void;
   onKeyboardClose: () => void;
@@ -470,23 +472,25 @@ function SnippetsModal({
   );
 }
 
-// Native text input for composing or pasting long terminal content.
+// Expanded bottom-sheet editor sharing the composer draft.
 function TerminalInputModal({
   open,
+  text,
+  onTextChange,
   onClose,
   onSend,
 }: {
   open: boolean;
+  text: string;
+  onTextChange: (text: string) => void;
   onClose: () => void;
   onSend: (text: string) => void;
 }) {
-  const [text, setText] = useState("");
+  const canSend = text.length > 0;
 
   const handleSend = () => {
-    if (!text) return;
+    if (!canSend) return;
     onSend(text);
-    setText("");
-    onClose();
   };
 
   if (!open) return null;
@@ -500,48 +504,51 @@ function TerminalInputModal({
         role="dialog"
         aria-modal="true"
         aria-label="Terminal input"
-        className="bg-background border-border flex h-[50vh] max-h-[32rem] min-h-48 w-full flex-col rounded-t-lg border-t p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
+        className="bg-background border-border flex h-[50vh] max-h-[32rem] min-h-48 w-full flex-col rounded-t-lg border-t shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium">Terminal input</span>
+        <div className="border-border flex items-center justify-between border-b px-3 py-2">
           <button
             type="button"
             onClick={onClose}
-            className="hover:bg-muted rounded-md p-1"
-            aria-label="Close terminal input"
-            title="Close terminal input"
+            className="hover:bg-muted rounded-md p-1.5"
+            aria-label="Collapse terminal input"
+            title="Collapse terminal input"
           >
-            <X className="h-5 w-5" />
+            <ChevronDown className="h-5 w-5" />
           </button>
-        </div>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder="Type or paste text..."
-          aria-label="Terminal text"
-          autoFocus
-          className="bg-muted focus:ring-primary min-h-40 w-full flex-1 resize-none rounded-md px-3 py-2 font-mono text-sm focus:ring-2 focus:outline-none"
-        />
-        <div className="mt-3 flex items-center justify-between gap-3">
-          <span className="text-muted-foreground text-xs tabular-nums">
-            {text.length.toLocaleString()} characters
-          </span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium">Terminal input</span>
+            <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
+              {text.length.toLocaleString()} characters
+            </span>
+          </div>
           <button
             type="button"
             onClick={handleSend}
-            disabled={!text}
-            className="bg-foreground text-background active:bg-foreground/80 flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+            disabled={!canSend}
+            className="bg-foreground text-background active:bg-foreground/80 flex items-center justify-center rounded-md p-2 text-sm font-medium disabled:opacity-50"
+            aria-label="Send message"
+            title="Send message"
           >
             <Send className="h-4 w-4" />
-            Send to Terminal
           </button>
+        </div>
+        <div className="flex flex-1 flex-col px-3 pt-2 pb-[calc(0.75rem+env(safe-area-inset-bottom))]">
+          <textarea
+            value={text}
+            onChange={(e) => onTextChange(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Type or paste text..."
+            aria-label="Terminal text"
+            autoFocus
+            className="bg-muted focus:ring-primary min-h-0 w-full flex-1 resize-none rounded-md px-3 py-2 font-mono text-sm focus:ring-2 focus:outline-none"
+          />
         </div>
       </div>
     </div>
@@ -551,6 +558,7 @@ function TerminalInputModal({
 export function TerminalToolbar({
   onKeyPress,
   onPasteText,
+  onSubmitText,
   keyboardOpen,
   onKeyboardToggle,
   onKeyboardClose,
@@ -560,6 +568,7 @@ export function TerminalToolbar({
   onSelectModeChange,
   visible = true,
 }: TerminalToolbarProps) {
+  const [draft, setDraft] = useState("");
   const [showTerminalInput, setShowTerminalInput] = useState(false);
   const [showSnippetsModal, setShowSnippetsModal] = useState(false);
   const [showComboModal, setShowComboModal] = useState(false);
@@ -595,6 +604,44 @@ export function TerminalToolbar({
     setShowTerminalInput(true);
   }, [onKeyboardClose, sendText]);
 
+  // Submit the composer: one bulk paste followed by Enter to run it.
+  const submitText = useCallback(
+    (text: string) => {
+      if (text) onSubmitText(text);
+    },
+    [onSubmitText]
+  );
+
+  // Mini composer send: keep focus so consecutive messages stay fast.
+  const handleMiniSend = useCallback(() => {
+    if (!draft) return;
+    submitText(draft);
+    setDraft("");
+  }, [draft, submitText]);
+
+  const handleMiniKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key !== "Enter" || e.shiftKey) return;
+      // Don't send while IME composition is still active.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      handleMiniSend();
+    },
+    [handleMiniSend]
+  );
+
+  // Expanded editor send: collapse back to the terminal to watch output.
+  const handleExpandedSend = useCallback(
+    (text: string) => {
+      if (!text) return;
+      submitText(text);
+      setDraft("");
+      setShowTerminalInput(false);
+      onKeyboardClose();
+    },
+    [onKeyboardClose, submitText]
+  );
+
   // Handle copy with visual feedback
   const handleCopy = useCallback(() => {
     if (onCopy?.()) {
@@ -619,8 +666,10 @@ export function TerminalToolbar({
     <>
       <TerminalInputModal
         open={showTerminalInput}
+        text={draft}
+        onTextChange={setDraft}
         onClose={() => setShowTerminalInput(false)}
-        onSend={sendText}
+        onSend={handleExpandedSend}
       />
       <SnippetsModal
         open={showSnippetsModal}
@@ -632,10 +681,66 @@ export function TerminalToolbar({
         onClose={() => setShowComboModal(false)}
         onSend={onKeyPress}
       />
+      <div className="border-border bg-background/95 flex items-center gap-1.5 border-t px-2 py-1.5 backdrop-blur">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={handleMiniKeyDown}
+          rows={1}
+          placeholder="Type a message..."
+          aria-label="Terminal message"
+          className="bg-muted focus:ring-primary min-w-0 flex-1 resize-none overflow-y-auto rounded-md px-3 py-1.5 text-sm leading-6 focus:ring-2 focus:outline-none"
+          style={{ maxHeight: "5.5rem" }}
+        />
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setShowTerminalInput(true);
+          }}
+          className="text-muted-foreground hover:bg-muted hover:text-foreground flex-shrink-0 rounded-md p-2"
+          aria-label="Expand terminal input"
+          title="Expand terminal input"
+        >
+          <Maximize2 className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            handleMiniSend();
+          }}
+          disabled={!draft}
+          className="bg-foreground text-background active:bg-foreground/80 flex-shrink-0 rounded-md p-2 text-sm font-medium disabled:opacity-50"
+          aria-label="Send message"
+          title="Send message"
+        >
+          <Send className="h-4 w-4" />
+        </button>
+      </div>
       <div
         className="bg-background/95 border-border scrollbar-none flex items-center gap-1 overflow-x-auto border-t px-2 py-1.5 backdrop-blur"
         onTouchEnd={(e) => e.stopPropagation()}
       >
+        {/* Combo keys button */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowComboModal(true);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+          aria-label="Combo keys"
+          title="Combo keys"
+        >
+          <Zap className="h-4 w-4" />
+        </button>
+
         {/* Native software keyboard control */}
         <button
           type="button"
@@ -661,40 +766,6 @@ export function TerminalToolbar({
             <Keyboard className="h-4 w-4" />
           )}
         </button>
-
-        {/* Long text input */}
-        <button
-          type="button"
-          onPointerDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onKeyboardClose();
-            setShowTerminalInput(true);
-          }}
-          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
-          aria-label="Open terminal input"
-          title="Open terminal input"
-        >
-          <MessageSquareText className="h-4 w-4" />
-        </button>
-
-        <div className="bg-border mx-1 h-6 w-px" />
-
-        {/* Combo keys button */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShowComboModal(true);
-          }}
-          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
-        >
-          <Zap className="h-4 w-4" />
-        </button>
-
-        {/* Enter key */}
         <button
           type="button"
           onMouseDown={(e) => e.preventDefault()}
