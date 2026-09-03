@@ -12,6 +12,7 @@ import type {
 } from "./useTerminalConnection.types";
 import {
   createTerminal,
+  setMobileKeyboardEnabled,
   updateTerminalForMobile,
   updateTerminalTheme,
 } from "./terminal-init";
@@ -34,6 +35,7 @@ export function useTerminalConnection({
 }: UseTerminalConnectionProps): UseTerminalConnectionReturn {
   const [connected, setConnected] = useState(false);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  const [isMobileKeyboardOpen, setIsMobileKeyboardOpen] = useState(false);
   const [connectionState, setConnectionState] = useState<
     "connecting" | "connected" | "disconnected" | "reconnecting"
   >("connecting");
@@ -93,7 +95,42 @@ export function useTerminalConnection({
     }
   }, []);
 
-  const focus = useCallback(() => xtermRef.current?.focus(), []);
+  const focus = useCallback(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    if (isMobile) {
+      setMobileKeyboardEnabled(term, false);
+      setIsMobileKeyboardOpen(false);
+    }
+    term.focus();
+  }, [isMobile]);
+
+  const openMobileKeyboard = useCallback(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    if (!isMobile) {
+      term.focus();
+      return;
+    }
+
+    // Re-focus after changing readonly so iOS treats this click as an
+    // explicit request to open the software keyboard.
+    term.blur();
+    setMobileKeyboardEnabled(term, true);
+    term.focus();
+    setIsMobileKeyboardOpen(true);
+  }, [isMobile]);
+
+  const closeMobileKeyboard = useCallback(() => {
+    const term = xtermRef.current;
+    if (!term) return;
+
+    if (isMobile) setMobileKeyboardEnabled(term, false);
+    term.blur();
+    setIsMobileKeyboardOpen(false);
+  }, [isMobile]);
 
   const getScrollState = useCallback((): TerminalScrollState | null => {
     if (!xtermRef.current || !terminalRef.current) return null;
@@ -149,6 +186,8 @@ export function useTerminalConnection({
     let cleanupResizeHandlers: (() => void) | null = null;
     let cleanupWebSocket: (() => void) | null = null;
     let cleanupTerminal: (() => void) | null = null;
+    let terminalTextarea: HTMLTextAreaElement | undefined;
+    let handleTerminalBlur: (() => void) | null = null;
 
     const connectTimeout = setTimeout(() => {
       if (cancelled || !terminalRef.current) return;
@@ -163,6 +202,14 @@ export function useTerminalConnection({
       fitAddonRef.current = fitAddon;
       searchAddonRef.current = searchAddon;
       cleanupTerminal = cleanup;
+
+      terminalTextarea = term.textarea;
+      handleTerminalBlur = () => {
+        if (!isMobile) return;
+        setMobileKeyboardEnabled(term, false);
+        setIsMobileKeyboardOpen(false);
+      };
+      terminalTextarea?.addEventListener("blur", handleTerminalBlur);
 
       // Scroll tracking
       term.onScroll(() => {
@@ -198,7 +245,8 @@ export function useTerminalConnection({
         wsRef,
         reconnectTimeoutRef,
         reconnectDelayRef,
-        intentionalCloseRef
+        intentionalCloseRef,
+        !isMobile
       );
       cleanupWebSocket = wsManager.cleanup;
       reconnectFnRef.current = wsManager.reconnect;
@@ -236,6 +284,9 @@ export function useTerminalConnection({
       cleanupResizeHandlers?.();
       cleanupWebSocket?.();
       cleanupTouchScroll?.();
+      if (handleTerminalBlur) {
+        terminalTextarea?.removeEventListener("blur", handleTerminalBlur);
+      }
       cleanupTerminal?.();
 
       // Reset refs
@@ -286,6 +337,9 @@ export function useTerminalConnection({
     sendInput,
     sendCommand,
     focus,
+    isMobileKeyboardOpen,
+    openMobileKeyboard,
+    closeMobileKeyboard,
     getScrollState,
     restoreScrollState,
     triggerResize,

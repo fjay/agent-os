@@ -126,6 +126,9 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
       sendInput,
       sendCommand,
       focus,
+      isMobileKeyboardOpen,
+      openMobileKeyboard,
+      closeMobileKeyboard,
       getScrollState,
       restoreScrollState,
       reconnect,
@@ -147,6 +150,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         sendInput(data);
       },
       [onUserInput, sendInput]
+    );
+
+    const pasteUserInput = useCallback(
+      (data: string) => {
+        if (!data) return;
+        if (xtermRef.current) {
+          xtermRef.current.paste(data);
+          return;
+        }
+        sendUserInput(data);
+      },
+      [sendUserInput, xtermRef]
     );
 
     const {
@@ -323,7 +338,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
             selectModeActive && "ring-primary ring-2 ring-inset",
             isDragging && "ring-primary ring-2 ring-inset"
           )}
-          onClick={focus}
+          onClick={isMobile ? undefined : focus}
           onTouchStart={
             selectModeActive ? (e) => e.stopPropagation() : undefined
           }
@@ -405,6 +420,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(
         {isMobile && (
           <TerminalToolbar
             onKeyPress={sendUserInput}
+            onPasteText={pasteUserInput}
+            keyboardOpen={isMobileKeyboardOpen}
+            onKeyboardToggle={
+              isMobileKeyboardOpen ? closeMobileKeyboard : openMobileKeyboard
+            }
+            onKeyboardClose={closeMobileKeyboard}
             onFilePicker={() => setShowFilePicker(true)}
             selectMode={selectModeActive}
             onSelectModeChange={handleSelectModeChange}

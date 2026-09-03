@@ -33,7 +33,8 @@ export function createWebSocketConnection(
   wsRef: React.MutableRefObject<WebSocket | null>,
   reconnectTimeoutRef: React.MutableRefObject<NodeJS.Timeout | null>,
   reconnectDelayRef: React.MutableRefObject<number>,
-  intentionalCloseRef: React.MutableRefObject<boolean>
+  intentionalCloseRef: React.MutableRefObject<boolean>,
+  autoFocus = true
 ): WebSocketManager {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const wsUrl = `${protocol}//${window.location.host}/ws/terminal`;
@@ -88,7 +89,7 @@ export function createWebSocketConnection(
       callbacks.onConnected?.();
       sendResize(term.cols, term.rows);
       flushPendingMessages(socket);
-      term.focus();
+      if (autoFocus) term.focus();
     };
 
     socket.onmessage = (event) => {

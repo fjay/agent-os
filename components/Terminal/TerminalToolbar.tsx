@@ -14,6 +14,9 @@ import {
   MousePointer2,
   Copy,
   Zap,
+  Keyboard,
+  KeyboardOff,
+  MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSpeechRecognition } from "@/hooks/useSpeechRecognition";
@@ -34,6 +37,10 @@ const SPECIAL_KEYS = {
 
 interface TerminalToolbarProps {
   onKeyPress: (key: string) => void;
+  onPasteText: (text: string) => void;
+  keyboardOpen: boolean;
+  onKeyboardToggle: () => void;
+  onKeyboardClose: () => void;
   onFilePicker?: () => void;
   onCopy?: () => boolean; // Returns true if selection was copied
   selectMode?: boolean;
@@ -463,65 +470,79 @@ function SnippetsModal({
   );
 }
 
-// Paste modal for when clipboard API isn't available
-function PasteModal({
+// Native text input for composing or pasting long terminal content.
+function TerminalInputModal({
   open,
   onClose,
-  onPaste,
+  onSend,
 }: {
   open: boolean;
   onClose: () => void;
-  onPaste: (text: string) => void;
+  onSend: (text: string) => void;
 }) {
   const [text, setText] = useState("");
 
   const handleSend = () => {
-    if (text) {
-      onPaste(text);
-      setText("");
-      onClose();
-    }
+    if (!text) return;
+    onSend(text);
+    setText("");
+    onClose();
   };
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50"
       onClick={onClose}
     >
       <div
-        className="bg-background w-[90%] max-w-md rounded-xl p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Terminal input"
+        className="bg-background border-border flex h-[50vh] max-h-[32rem] min-h-48 w-full flex-col rounded-t-lg border-t p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between">
-          <span className="text-sm font-medium">Paste text</span>
-          <button onClick={onClose} className="hover:bg-muted rounded-md p-1">
+          <span className="text-sm font-medium">Terminal input</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="hover:bg-muted rounded-md p-1"
+            aria-label="Close terminal input"
+            title="Close terminal input"
+          >
             <X className="h-5 w-5" />
           </button>
         </div>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onPaste={(e) => {
-            const pasted = e.clipboardData?.getData("text");
-            if (pasted) {
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
               e.preventDefault();
-              setText((prev) => prev + pasted);
+              handleSend();
             }
           }}
-          placeholder="Tap here, then long-press to paste..."
+          placeholder="Type or paste text..."
+          aria-label="Terminal text"
           autoFocus
-          className="bg-muted focus:ring-primary h-24 w-full resize-none rounded-lg px-3 py-2 text-sm focus:ring-2 focus:outline-none"
+          className="bg-muted focus:ring-primary min-h-40 w-full flex-1 resize-none rounded-md px-3 py-2 font-mono text-sm focus:ring-2 focus:outline-none"
         />
-        <button
-          onClick={handleSend}
-          disabled={!text}
-          className="bg-primary text-primary-foreground mt-3 flex w-full items-center justify-center gap-2 rounded-lg py-2.5 font-medium disabled:opacity-50"
-        >
-          <Send className="h-4 w-4" />
-          Send to Terminal
-        </button>
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <span className="text-muted-foreground text-xs tabular-nums">
+            {text.length.toLocaleString()} characters
+          </span>
+          <button
+            type="button"
+            onClick={handleSend}
+            disabled={!text}
+            className="bg-foreground text-background active:bg-foreground/80 flex items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium disabled:opacity-50"
+          >
+            <Send className="h-4 w-4" />
+            Send to Terminal
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -529,26 +550,28 @@ function PasteModal({
 
 export function TerminalToolbar({
   onKeyPress,
+  onPasteText,
+  keyboardOpen,
+  onKeyboardToggle,
+  onKeyboardClose,
   onFilePicker,
   onCopy,
   selectMode = false,
   onSelectModeChange,
   visible = true,
 }: TerminalToolbarProps) {
-  const [showPasteModal, setShowPasteModal] = useState(false);
+  const [showTerminalInput, setShowTerminalInput] = useState(false);
   const [showSnippetsModal, setShowSnippetsModal] = useState(false);
   const [showComboModal, setShowComboModal] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [copyFeedback, setCopyFeedback] = useState(false);
 
-  // Send text character-by-character to terminal
+  // Send text as one xterm paste event instead of one WebSocket message per character.
   const sendText = useCallback(
     (text: string) => {
-      for (const char of text) {
-        onKeyPress(char);
-      }
+      if (text) onPasteText(text);
     },
-    [onKeyPress]
+    [onPasteText]
   );
 
   const {
@@ -568,8 +591,9 @@ export function TerminalToolbar({
     } catch {
       // Clipboard API failed or unavailable
     }
-    setShowPasteModal(true);
-  }, [sendText]);
+    onKeyboardClose();
+    setShowTerminalInput(true);
+  }, [onKeyboardClose, sendText]);
 
   // Handle copy with visual feedback
   const handleCopy = useCallback(() => {
@@ -582,22 +606,21 @@ export function TerminalToolbar({
   if (!visible) return null;
 
   const buttons = [
-    { label: "Esc", key: SPECIAL_KEYS.ESC },
-    { label: "^C", key: SPECIAL_KEYS.CTRL_C, highlight: true },
-    { label: "Tab", key: SPECIAL_KEYS.TAB },
-    { label: "^D", key: SPECIAL_KEYS.CTRL_D },
     { label: "←", key: SPECIAL_KEYS.LEFT },
     { label: "→", key: SPECIAL_KEYS.RIGHT },
     { label: "↑", key: SPECIAL_KEYS.UP },
     { label: "↓", key: SPECIAL_KEYS.DOWN },
+    { label: "Esc", key: SPECIAL_KEYS.ESC },
+    { label: "^C", key: SPECIAL_KEYS.CTRL_C, highlight: true },
+    { label: "Tab", key: SPECIAL_KEYS.TAB },
   ];
 
   return (
     <>
-      <PasteModal
-        open={showPasteModal}
-        onClose={() => setShowPasteModal(false)}
-        onPaste={sendText}
+      <TerminalInputModal
+        open={showTerminalInput}
+        onClose={() => setShowTerminalInput(false)}
+        onSend={sendText}
       />
       <SnippetsModal
         open={showSnippetsModal}
@@ -613,6 +636,51 @@ export function TerminalToolbar({
         className="bg-background/95 border-border scrollbar-none flex items-center gap-1 overflow-x-auto border-t px-2 py-1.5 backdrop-blur"
         onTouchEnd={(e) => e.stopPropagation()}
       >
+        {/* Native software keyboard control */}
+        <button
+          type="button"
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onKeyboardToggle();
+          }}
+          className={cn(
+            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+            keyboardOpen
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
+          )}
+          aria-label={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+          aria-pressed={keyboardOpen}
+          title={keyboardOpen ? "Hide keyboard" : "Show keyboard"}
+        >
+          {keyboardOpen ? (
+            <KeyboardOff className="h-4 w-4" />
+          ) : (
+            <Keyboard className="h-4 w-4" />
+          )}
+        </button>
+
+        {/* Long text input */}
+        <button
+          type="button"
+          onPointerDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onKeyboardClose();
+            setShowTerminalInput(true);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+          aria-label="Open terminal input"
+          title="Open terminal input"
+        >
+          <MessageSquareText className="h-4 w-4" />
+        </button>
+
+        <div className="bg-border mx-1 h-6 w-px" />
+
         {/* Combo keys button */}
         <button
           type="button"
@@ -624,24 +692,6 @@ export function TerminalToolbar({
           className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
         >
           <Zap className="h-4 w-4" />
-        </button>
-
-        {/* Shift toggle */}
-        <button
-          type="button"
-          onMouseDown={(e) => e.preventDefault()}
-          onClick={(e) => {
-            e.stopPropagation();
-            setShiftActive(!shiftActive);
-          }}
-          className={cn(
-            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
-            shiftActive
-              ? "bg-primary text-primary-foreground"
-              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
-          )}
-        >
-          ⇧
         </button>
 
         {/* Enter key */}
@@ -684,6 +734,38 @@ export function TerminalToolbar({
             {btn.label}
           </button>
         ))}
+
+        {/* Shift toggle */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            setShiftActive(!shiftActive);
+          }}
+          className={cn(
+            "flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium",
+            shiftActive
+              ? "bg-primary text-primary-foreground"
+              : "bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground"
+          )}
+        >
+          ⇧
+        </button>
+
+        {/* Ctrl+D */}
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onKeyPress(SPECIAL_KEYS.CTRL_D);
+            if (shiftActive) setShiftActive(false);
+          }}
+          className="bg-secondary text-secondary-foreground active:bg-primary active:text-primary-foreground flex-shrink-0 rounded-md px-2.5 py-1.5 text-xs font-medium"
+        >
+          ^D
+        </button>
 
         {/* Divider */}
         <div className="bg-border mx-1 h-6 w-px" />

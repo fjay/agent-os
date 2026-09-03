@@ -49,6 +49,10 @@ export function createTerminal(
   term.loadAddon(searchAddon);
   term.open(container);
 
+  if (isMobile) {
+    setMobileKeyboardEnabled(term, false);
+  }
+
   // 优先使用 WebGL 硬件加速渲染器：性能优于 Canvas/DOM，且不会出现 Canvas 渲染器
   // 在原地刷新内容变短时的像素残影（官方已废弃 Canvas 渲染器，WebGL 为推荐替代）。
   // 若当前环境不支持 WebGL（无 GPU 等），静默回退到默认 DOM 渲染器。
@@ -120,6 +124,14 @@ export function createTerminal(
   };
 
   return { term, fitAddon, searchAddon, cleanup };
+}
+
+export function setMobileKeyboardEnabled(term: XTerm, enabled: boolean): void {
+  const textarea = term.textarea;
+  if (!textarea) return;
+
+  textarea.readOnly = !enabled;
+  textarea.inputMode = enabled ? "text" : "none";
 }
 
 export function updateTerminalForMobile(

@@ -33,6 +33,9 @@ export interface UseTerminalConnectionReturn {
   sendInput: (data: string) => void;
   sendCommand: (command: string) => void;
   focus: () => void;
+  isMobileKeyboardOpen: boolean;
+  openMobileKeyboard: () => void;
+  closeMobileKeyboard: () => void;
   getScrollState: () => TerminalScrollState | null;
   restoreScrollState: (state: TerminalScrollState) => void;
   triggerResize: () => void;
